@@ -1,15 +1,12 @@
-from ..core.commands import lua_escape, run_script
-from ..core.boundary import require_file
+from ..core.commands import call
+from ..core.boundary import require_color, require_file
 from ..core.errors import InputError
-from ..core.lua import FIND_LAYER, NORMALIZE_CEL, PSET, HSL
-from ..core.colors import parse_hex_color
 from .. import mcp
 
 
-def _parse_hex_color(value: str) -> tuple[int, int, int] | None:
-    """RGB-only parse (alpha dropped); unified via core.colors.parse_hex_color."""
-    rgba = parse_hex_color(value)
-    return rgba[:3] if rgba else None
+def _opaque_color(value: str, field: str) -> list[int]:
+    """These effects paint opaque pixels: any alpha in the colour is ignored."""
+    return require_color(value, field)[:3] + [255]
 
 
 @mcp.tool()
@@ -36,59 +33,8 @@ async def outline_cel(
     """
     require_file(filename)
 
-    rgb = _parse_hex_color(color)
-    if rgb is None:
-        raise InputError(f"Invalid color value: {color}")
-    r, g, b = rgb
-    diag = "true" if include_diagonals else "false"
-
-    safe_layer = lua_escape(layer_name)
-    script = f"""
-    {FIND_LAYER}
-    {NORMALIZE_CEL}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then print("ERROR:Frame index out of range") return end
-
-    local target = find_layer(spr, "{safe_layer}")
-    if not target then print("ERROR:Layer not found") return end
-
-    app.transaction(function()
-        local cel = normalize_cel(spr, target, spr.frames[idx], false)
-        if not cel then print("ERROR:No cel at that layer/frame") return end
-        local img = cel.image
-        local src = img:clone()
-        local outline = app.pixelColor.rgba({r}, {g}, {b}, 255)
-
-        local function opaque(x, y)
-            if x < 0 or y < 0 or x >= src.width or y >= src.height then return false end
-            return app.pixelColor.rgbaA(src:getPixel(x, y)) > 0
-        end
-
-        for py = 0, img.height - 1 do
-            for px = 0, img.width - 1 do
-                if app.pixelColor.rgbaA(src:getPixel(px, py)) == 0 then
-                    local touch = opaque(px - 1, py) or opaque(px + 1, py)
-                                  or opaque(px, py - 1) or opaque(px, py + 1)
-                    if not touch and {diag} then
-                        touch = opaque(px - 1, py - 1) or opaque(px + 1, py - 1)
-                                or opaque(px - 1, py + 1) or opaque(px + 1, py + 1)
-                    end
-                    if touch then
-                        img:putPixel(px, py, outline)
-                    end
-                end
-            end
-        end
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("fx.outline", filename, layer=layer_name, frame=frame_index,
+               color=_opaque_color(color, "color"), diagonals=include_diagonals)
     return f"Outline added to '{layer_name}' frame {frame_index} in {filename}"
 
 
@@ -112,63 +58,15 @@ async def replace_color(
         tolerance: Per-channel tolerance 0-255 (default 0 = exact match)
     """
     require_file(filename)
-
-    src = _parse_hex_color(from_color)
-    dst = _parse_hex_color(to_color)
-    if src is None or dst is None:
-        raise InputError("Colors must use #RRGGBB values")
+    source = require_color(from_color, "from_color")
+    target = require_color(to_color, "to_color")
     if tolerance < 0 or tolerance > 255:
         raise InputError("Tolerance must be between 0 and 255")
-    sr, sg, sb = src
-    dr, dg, db = dst
 
-    safe_layer = lua_escape(layer_name)
-    script = f"""
-    {FIND_LAYER}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then print("ERROR:Frame index out of range") return end
-
-    local target = find_layer(spr, "{safe_layer}")
-    if not target then print("ERROR:Layer not found") return end
-
-    local cel = target:cel(spr.frames[idx])
-    if not cel then print("ERROR:No cel at that layer/frame") return end
-
-    local count = 0
-    app.transaction(function()
-        local img = cel.image
-        for py = 0, img.height - 1 do
-            for px = 0, img.width - 1 do
-                local v = img:getPixel(px, py)
-                local a = app.pixelColor.rgbaA(v)
-                if a > 0 then
-                    local cr = math.abs(app.pixelColor.rgbaR(v) - {sr})
-                    local cg = math.abs(app.pixelColor.rgbaG(v) - {sg})
-                    local cb = math.abs(app.pixelColor.rgbaB(v) - {sb})
-                    if cr <= {tolerance} and cg <= {tolerance} and cb <= {tolerance} then
-                        img:putPixel(px, py, app.pixelColor.rgba({dr}, {dg}, {db}, a))
-                        count = count + 1
-                    end
-                end
-            end
-        end
-    end)
-
-    spr:saveAs(spr.filename)
-    print("COUNT:" .. count)
-    """
-
-    output = await run_script(script, filename)
-
-    count = "?"
-    for line in output.splitlines():
-        if line.startswith("COUNT:"):
-            count = line[len("COUNT:"):]
+    result = await call("fx.replace_color", filename, layer=layer_name, frame=frame_index,
+                        from_color=source, to_color=target, tolerance=tolerance)
     return (
-        f"Replaced {count} pixels {from_color} -> {to_color} on '{layer_name}' "
+        f"Replaced {result['count']} pixels {from_color} -> {to_color} on '{layer_name}' "
         f"frame {frame_index} in {filename}"
     )
 
@@ -204,48 +102,8 @@ async def adjust_hsl(
     if not (-100 <= lightness_shift <= 100):
         raise InputError("lightness_shift must be between -100 and 100")
 
-    safe_layer = lua_escape(layer_name)
-    script = f"""
-    {FIND_LAYER}
-    {HSL}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then print("ERROR:Frame index out of range") return end
-
-    local target = find_layer(spr, "{safe_layer}")
-    if not target then print("ERROR:Layer not found") return end
-
-    local cel = target:cel(spr.frames[idx])
-    if not cel then print("ERROR:No cel at that layer/frame") return end
-
-    app.transaction(function()
-        local img = cel.image
-        for py = 0, img.height - 1 do
-            for px = 0, img.width - 1 do
-                local v = img:getPixel(px, py)
-                local a = app.pixelColor.rgbaA(v)
-                if a > 0 then
-                    local h, s, l = rgb_to_hsl(
-                        app.pixelColor.rgbaR(v),
-                        app.pixelColor.rgbaG(v),
-                        app.pixelColor.rgbaB(v))
-                    h = h + ({hue_shift})
-                    s = math.min(1, math.max(0, s + ({saturation_shift}) / 100))
-                    l = math.min(1, math.max(0, l + ({lightness_shift}) / 100))
-                    local nr, ng, nb = hsl_to_rgb(h, s, l)
-                    img:putPixel(px, py, app.pixelColor.rgba(nr, ng, nb, a))
-                end
-            end
-        end
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("fx.adjust_hsl", filename, layer=layer_name, frame=frame_index,
+               hue=hue_shift, saturation=saturation_shift, lightness=lightness_shift)
     return (
         f"Adjusted HSL (h{hue_shift:+g}, s{saturation_shift:+g}, l{lightness_shift:+g}) "
         f"on '{layer_name}' frame {frame_index} in {filename}"
@@ -289,61 +147,10 @@ async def apply_dither_gradient(
     if width <= 0 or height <= 0:
         raise InputError("Width and height must be > 0")
 
-    start = _parse_hex_color(color_start)
-    end = _parse_hex_color(color_end)
-    if start is None or end is None:
-        raise InputError("Colors must use #RRGGBB values")
-    r1, g1, b1 = start
-    r2, g2, b2 = end
-    create = "true" if create_if_missing else "false"
-    axis = "px - " + str(x) if horizontal else "py - " + str(y)
-    span = width if horizontal else height
-
-    safe_layer = lua_escape(layer_name)
-    script = f"""
-    {FIND_LAYER}
-    {NORMALIZE_CEL}
-    {PSET}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then print("ERROR:Frame index out of range") return end
-
-    local target = find_layer(spr, "{safe_layer}")
-    if not target then print("ERROR:Layer not found") return end
-
-    local bayer = {{
-        {{ 0,  8,  2, 10}},
-        {{12,  4, 14,  6}},
-        {{ 3, 11,  1,  9}},
-        {{15,  7, 13,  5}},
-    }}
-
-    app.transaction(function()
-        local cel = normalize_cel(spr, target, spr.frames[idx], {create})
-        if not cel then print("ERROR:No cel at that layer/frame") return end
-        local img = cel.image
-        local c1 = app.pixelColor.rgba({r1}, {g1}, {b1}, 255)
-        local c2 = app.pixelColor.rgba({r2}, {g2}, {b2}, 255)
-        for py = {y}, {y} + {height} - 1 do
-            for px = {x}, {x} + {width} - 1 do
-                local f = ({axis}) / math.max(1, {span} - 1)
-                local threshold = (bayer[(py % 4) + 1][(px % 4) + 1] + 0.5) / 16
-                if f >= threshold then
-                    pset(img, px, py, c2)
-                else
-                    pset(img, px, py, c1)
-                end
-            end
-        end
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("fx.dither_gradient", filename, layer=layer_name, frame=frame_index, create=create_if_missing,
+               x=x, y=y, width=width, height=height, horizontal=horizontal,
+               color_start=_opaque_color(color_start, "color_start"),
+               color_end=_opaque_color(color_end, "color_end"))
     direction = "horizontal" if horizontal else "vertical"
     return (
         f"Dithered {direction} gradient {color_start} -> {color_end} applied at "
@@ -390,58 +197,9 @@ async def apply_dither_pattern(
     if not (0 <= density <= 1):
         raise InputError("density must be between 0.0 and 1.0")
 
-    a = _parse_hex_color(color_a)
-    b = _parse_hex_color(color_b)
-    if a is None or b is None:
-        raise InputError("Colors must use #RRGGBB values")
-    r1, g1, b1 = a
-    r2, g2, b2 = b
-    create = "true" if create_if_missing else "false"
-
-    safe_layer = lua_escape(layer_name)
-    script = f"""
-    {FIND_LAYER}
-    {NORMALIZE_CEL}
-    {PSET}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then print("ERROR:Frame index out of range") return end
-
-    local target = find_layer(spr, "{safe_layer}")
-    if not target then print("ERROR:Layer not found") return end
-
-    local bayer = {{
-        {{ 0,  8,  2, 10}},
-        {{12,  4, 14,  6}},
-        {{ 3, 11,  1,  9}},
-        {{15,  7, 13,  5}},
-    }}
-
-    app.transaction(function()
-        local cel = normalize_cel(spr, target, spr.frames[idx], {create})
-        if not cel then print("ERROR:No cel at that layer/frame") return end
-        local img = cel.image
-        local ca = app.pixelColor.rgba({r1}, {g1}, {b1}, 255)
-        local cb = app.pixelColor.rgba({r2}, {g2}, {b2}, 255)
-        for py = {y}, {y} + {height} - 1 do
-            for px = {x}, {x} + {width} - 1 do
-                local threshold = (bayer[(py % 4) + 1][(px % 4) + 1] + 0.5) / 16
-                if {density} > threshold then
-                    pset(img, px, py, cb)
-                else
-                    pset(img, px, py, ca)
-                end
-            end
-        end
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("fx.dither_pattern", filename, layer=layer_name, frame=frame_index, create=create_if_missing,
+               x=x, y=y, width=width, height=height, density=density,
+               color_a=_opaque_color(color_a, "color_a"), color_b=_opaque_color(color_b, "color_b"))
     return (
         f"Dither pattern ({color_a}/{color_b}, density {density}) applied at "
         f"({x},{y}) {width}x{height} on '{layer_name}' frame {frame_index} in {filename}"

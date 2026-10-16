@@ -158,8 +158,7 @@ end)
 
 lib.edit("animation.set_cel_opacity", function(sprite, a)
   local frame = lib.frame(sprite, a.frame)
-  local cel = lib.layer(sprite, a.name):cel(frame) or lib.fail("NoCel", "No cel at that layer/frame")
-  cel.opacity = a.opacity
+  lib.cel(lib.layer(sprite, a.name), frame).opacity = a.opacity
 end)
 
 lib.edit("animation.propagate_cels", function(sprite, a)

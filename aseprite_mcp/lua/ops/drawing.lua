@@ -16,13 +16,11 @@ local function target(sprite, a)
   return lib.default_target(sprite)
 end
 
-local function no_cel()
-  lib.fail("NoCel", "No cel at that layer/frame")
-end
-
 local function painter(sprite, a)
   local layer, frame = target(sprite, a)
-  local cel = lib.paint_cel(sprite, layer, frame, a.create) or no_cel()
+  -- paint_cel returns nil only when there is no cel and none may be created;
+  -- lib.cel then raises NoCel.
+  local cel = lib.paint_cel(sprite, layer, frame, a.create) or lib.cel(layer, frame)
   return lib.painter(sprite, cel)
 end
 
@@ -79,7 +77,7 @@ end
 local function use_tool(sprite, a, tool, points)
   local layer, frame = target(sprite, a)
   if not layer:cel(frame) then
-    if not a.create then no_cel() end
+    if not a.create then lib.cel(layer, frame) end  -- raises NoCel
     sprite:newCel(layer, frame, Image(sprite.width, sprite.height, sprite.colorMode), Point(0, 0))
   end
   app.activeLayer = layer

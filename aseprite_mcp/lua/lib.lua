@@ -80,6 +80,11 @@ function lib.frame(sprite, index, message)
   return sprite.frames[index] or lib.fail("FrameOutOfRange", message or "Frame index out of range")
 end
 
+-- The existing cel on layer/frame.
+function lib.cel(layer, frame)
+  return layer:cel(frame) or lib.fail("NoCel", "No cel at that layer/frame")
+end
+
 -- Validates an inclusive 1-based range and returns its bounds.
 function lib.frame_range(sprite, first, last)
   if first < 1 or last > #sprite.frames or first > last then

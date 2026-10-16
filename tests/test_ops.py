@@ -10,7 +10,7 @@ from aseprite_mcp.core.errors import AsepriteError
 from aseprite_mcp.tools import canvas, layers
 
 # Modules whose tools only call ops. They must not build Lua in Python again.
-MIGRATED = ["animation", "canvas", "drawing", "layers"]
+MIGRATED = ["animation", "canvas", "drawing", "fx", "layers", "native_fx"]
 
 TOOLS_DIR = os.path.join(os.path.dirname(__file__), "..", "aseprite_mcp", "tools")
 

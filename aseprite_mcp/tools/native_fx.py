@@ -10,11 +10,9 @@ General value (upstream-able): nothing Chimera-specific here.
 """
 import json
 
-from ..core.commands import lua_escape, run_script
-from ..core.boundary import require_file
+from ..core.commands import call
+from ..core.boundary import require_color, require_file
 from ..core.errors import InputError
-from ..core.native import build_native_command_script
-from .fx import _parse_hex_color
 from .. import mcp
 
 # Built-in convolution-matrix resource names (Aseprite data/convmatr.def).
@@ -34,8 +32,14 @@ CONVOLUTION_MATRICES = frozenset({
 })
 
 
-def _region(x: int, y: int, width: int, height: int):
-    return (x, y, width, height) if width > 0 and height > 0 else None
+def _region(x: int, y: int, width: int, height: int) -> list[int] | None:
+    """[x, y, w, h] when width and height are > 0, else None (the whole cel)."""
+    return [x, y, width, height] if width > 0 and height > 0 else None
+
+
+def _target(layer_name: str, frame_index: int) -> dict:
+    """Empty layer_name means the default target (see lib.default_target)."""
+    return {"layer": layer_name or None, "frame": frame_index}
 
 
 @mcp.tool()
@@ -61,18 +65,14 @@ async def outline_native(
         matrix: "circle" or "square"
     """
     require_file(filename)
-    rgb = _parse_hex_color(color)
-    if not rgb:
-        raise InputError("Invalid color (expected #RRGGBB)")
+    color_rgba = require_color(color)[:3] + [255]
     if place not in ("outside", "inside"):
         raise InputError("place must be 'outside' or 'inside'")
     if matrix not in ("circle", "square"):
         raise InputError("matrix must be 'circle' or 'square'")
-    r, g, b = rgb
-    cmd = (f'        app.command.Outline{{ui=false, color=Color{{r={r}, g={g}, '
-           f'b={b}, a=255}}, place="{place}", matrix="{matrix}"}}')
-    script = build_native_command_script(cmd, layer_name, frame_index)
-    await run_script(script, filename)
+
+    await call("native.outline", filename, color=color_rgba, place=place, matrix=matrix,
+               **_target(layer_name, frame_index))
     return f"Outlined ({place}, {matrix}) {layer_name or 'active layer'} in {filename}"
 
 
@@ -105,11 +105,9 @@ async def adjust_hsl_native(
         raise InputError("hue must be -180..180")
     if not (-100 <= saturation <= 100) or not (-100 <= lightness <= 100):
         raise InputError("saturation and lightness must be -100..100")
-    cmd = (f'        app.command.HueSaturation{{ui=false, hue={hue}, '
-           f'saturation={saturation}, lightness={lightness}, alpha=0}}')
-    script = build_native_command_script(cmd, layer_name, frame_index,
-                                         _region(x, y, width, height))
-    await run_script(script, filename)
+
+    await call("native.hue_saturation", filename, hue=hue, saturation=saturation, lightness=lightness,
+               region=_region(x, y, width, height), **_target(layer_name, frame_index))
     return f"Adjusted HSL on {layer_name or 'active layer'} in {filename}"
 
 
@@ -138,11 +136,9 @@ async def adjust_brightness_contrast(
     require_file(filename)
     if not (-100 <= brightness <= 100) or not (-100 <= contrast <= 100):
         raise InputError("brightness and contrast must be -100..100")
-    cmd = (f'        app.command.BrightnessContrast{{ui=false, '
-           f'brightness={brightness}, contrast={contrast}}}')
-    script = build_native_command_script(cmd, layer_name, frame_index,
-                                         _region(x, y, width, height))
-    await run_script(script, filename)
+
+    await call("native.brightness_contrast", filename, brightness=brightness, contrast=contrast,
+               region=_region(x, y, width, height), **_target(layer_name, frame_index))
     return f"Adjusted brightness/contrast on {layer_name or 'active layer'} in {filename}"
 
 
@@ -165,10 +161,8 @@ async def invert_colors(
         x, y, width, height: optional region (width>0 & height>0 to scope)
     """
     require_file(filename)
-    cmd = "        app.command.InvertColor{ui=false}"
-    script = build_native_command_script(cmd, layer_name, frame_index,
-                                         _region(x, y, width, height))
-    await run_script(script, filename)
+
+    await call("native.invert", filename, region=_region(x, y, width, height), **_target(layer_name, frame_index))
     return f"Inverted colours on {layer_name or 'active layer'} in {filename}"
 
 
@@ -197,10 +191,9 @@ async def apply_convolution(
     if matrix not in CONVOLUTION_MATRICES:
         raise InputError(f"Unknown matrix {matrix!r}; call list_convolution_matrices for "
                          f"the {len(CONVOLUTION_MATRICES)} valid names")
-    cmd = f'        app.command.ConvolutionMatrix{{ui=false, fromResource="{lua_escape(matrix)}"}}'
-    script = build_native_command_script(cmd, layer_name, frame_index,
-                                         _region(x, y, width, height))
-    await run_script(script, filename)
+
+    await call("native.convolution", filename, matrix=matrix, region=_region(x, y, width, height),
+               **_target(layer_name, frame_index))
     return f"Applied convolution '{matrix}' on {layer_name or 'active layer'} in {filename}"
 
 
@@ -237,21 +230,6 @@ async def extract_palette(
     require_file(filename)
     if not (1 <= max_colors <= 256):
         raise InputError("max_colors must be 1..256")
-    wa = "true" if with_alpha else "false"
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-    app.transaction(function()
-        app.command.ColorQuantization{{ui=false, maxColors={max_colors}, withAlpha={wa}}}
-    end)
-    spr:saveAs(spr.filename)
-    local pal = spr.palettes[1]
-    for i = 0, #pal - 1 do
-        local c = pal:getColor(i)
-        print(string.format("PALETTE:#%02X%02X%02X", c.red, c.green, c.blue))
-    end
-    print("OK")
-    """
-    output = await run_script(script, filename)
-    colors = [ln[len("PALETTE:"):] for ln in output.splitlines() if ln.startswith("PALETTE:")]
-    return json.dumps({"colors": colors, "count": len(colors)})
+
+    result = await call("native.extract_palette", filename, max_colors=max_colors, with_alpha=with_alpha)
+    return json.dumps({"colors": result["colors"], "count": len(result["colors"])})
