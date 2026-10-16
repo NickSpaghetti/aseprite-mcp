@@ -106,3 +106,49 @@ function lib.image_layers(sprite)
   walk(sprite.layers)
   return found
 end
+
+-- A Color from the [r, g, b, a] list that tools send.
+function lib.color(c)
+  return Color { r = c[1], g = c[2], b = c[3], a = c[4] }
+end
+
+-- The cel on layer/frame, ready for drawing in sprite coordinates.
+--
+-- The cel image is grown so it covers the whole canvas. Content that already
+-- hangs off the canvas is kept (the image grows to the union of both), so
+-- nothing is cropped. Creates an empty canvas-sized cel when there is none
+-- and `create` is set; returns nil when there is none and it is not.
+function lib.paint_cel(sprite, layer, frame, create)
+  local cel = layer:cel(frame)
+  if not cel then
+    if not create then return nil end
+    return sprite:newCel(layer, frame, Image(sprite.width, sprite.height, sprite.colorMode), Point(0, 0))
+  end
+  local x, y = cel.position.x, cel.position.y
+  local left, top = math.min(0, x), math.min(0, y)
+  local right = math.max(sprite.width, x + cel.image.width)
+  local bottom = math.max(sprite.height, y + cel.image.height)
+  if left ~= x or top ~= y or right - left ~= cel.image.width or bottom - top ~= cel.image.height then
+    local image = Image(right - left, bottom - top, sprite.colorMode)
+    image:drawImage(cel.image, Point(x - left, y - top), 255, BlendMode.SRC)
+    cel.image = image
+    cel.position = Point(left, top)
+  end
+  return cel
+end
+
+-- put(x, y, color) for sprite coordinates on a cel from paint_cel. Pixels
+-- outside the canvas are skipped.
+function lib.painter(sprite, cel)
+  local image, ox, oy = cel.image, cel.position.x, cel.position.y
+  local width, height = sprite.width, sprite.height
+  return function(x, y, color)
+    if x >= 0 and y >= 0 and x < width and y < height then image:putPixel(x - ox, y - oy, color) end
+  end
+end
+
+-- The target of the tools that take no layer or frame: the layer Aseprite
+-- makes active when it opens the file (the bottom one) on frame 1.
+function lib.default_target(sprite)
+  return app.activeLayer or sprite.layers[1], sprite.frames[1]
+end
