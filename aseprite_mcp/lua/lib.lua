@@ -85,6 +85,19 @@ function lib.cel(layer, frame)
   return layer:cel(frame) or lib.fail("NoCel", "No cel at that layer/frame")
 end
 
+-- The cel on layer/frame. When there is none and `create` is set, make one:
+-- a copy of the cel on `source_index` if that frame has one, else an empty
+-- canvas-sized cel. Returns nil when there is none and `create` is not set.
+function lib.ensure_cel(sprite, layer, frame, create, source_index)
+  local cel = layer:cel(frame)
+  if cel or not create then return cel end
+  local source = layer:cel(lib.frame(sprite, source_index, "Source frame out of range"))
+  if source then
+    return sprite:newCel(layer, frame, source.image:clone(), source.position)
+  end
+  return sprite:newCel(layer, frame, Image(sprite.width, sprite.height, sprite.colorMode), Point(0, 0))
+end
+
 -- Validates an inclusive 1-based range and returns its bounds.
 function lib.frame_range(sprite, first, last)
   if first < 1 or last > #sprite.frames or first > last then

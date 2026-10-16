@@ -1,11 +1,10 @@
 import colorsys
 import json
 from typing import List
-from ..core.commands import lua_escape, run_script
-from ..core.boundary import require_file
+
+from ..core.commands import call
+from ..core.boundary import require_color, require_file
 from ..core.errors import InputError
-from ..core.lua import FIND_LAYER
-from ..core.colors import parse_hex_color
 from .. import mcp
 
 # Well-known retro/pixel-art palettes.
@@ -44,40 +43,21 @@ PALETTE_PRESETS = {
     ],
 }
 
-def _parse_hex_color(value: str) -> tuple[int, int, int] | None:
-    """RGB-only parse (alpha dropped); unified via core.colors.parse_hex_color."""
-    rgba = parse_hex_color(value)
-    return rgba[:3] if rgba else None
+def _mapping(m: dict) -> list[list[int]]:
+    """{"from": hex, "to": hex} -> [[r, g, b, a], [r, g, b, a]]."""
+    if not isinstance(m, dict):
+        raise InputError(f"Each mapping must be an object with 'from' and 'to' colours, got {m!r}")
+    return [require_color(m.get("from"), "mapping 'from'"), require_color(m.get("to"), "mapping 'to'")]
+
 
 @mcp.tool()
 async def get_palette(filename: str) -> str:
     """Get the active sprite palette as a JSON array of hex colors."""
     require_file(filename)
 
-    script = """
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
+    result = await call("palette.get", filename)
+    return json.dumps(result["colors"])
 
-    local ok, pal = pcall(function() return spr.palettes[1] end)
-    if not ok or not pal then print("ERROR:No palette") return end
-
-    local parts = {}
-    local size = #pal
-    table.insert(parts, "[")
-    for i = 0, size - 1 do
-        local c = pal:getColor(i)
-        local hex = string.format("#%02X%02X%02X", c.red, c.green, c.blue)
-        table.insert(parts, "\\"" .. hex .. "\\"")
-        if i < size - 1 then
-            table.insert(parts, ",")
-        end
-    end
-    table.insert(parts, "]")
-    print(table.concat(parts))
-    """
-
-    output = await run_script(script, filename)
-    return output
 
 @mcp.tool()
 async def set_palette(filename: str, colors: List[str]) -> str:
@@ -86,30 +66,9 @@ async def set_palette(filename: str, colors: List[str]) -> str:
     if not colors:
         raise InputError("Colors list cannot be empty")
 
-    rgb_list = []
-    for color in colors:
-        rgb = _parse_hex_color(color)
-        if rgb is None:
-            raise InputError("Colors must use #RRGGBB values")
-        rgb_list.append(rgb)
-
-    palette_entries = "\n".join(
-        [f"    pal:setColor({i}, Color({r}, {g}, {b}))" for i, (r, g, b) in enumerate(rgb_list)]
-    )
-
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local pal = Palette({len(rgb_list)})
-{palette_entries}
-    spr:setPalette(pal)
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("palette.set", filename, colors=[require_color(c) for c in colors])
     return f"Palette set with {len(colors)} colors in {filename}"
+
 
 @mcp.tool()
 async def remap_colors_in_cel_range(
@@ -136,90 +95,9 @@ async def remap_colors_in_cel_range(
     if not mappings:
         raise InputError("Mappings list cannot be empty")
 
-    parsed = []
-    for m in mappings:
-        src = _parse_hex_color(m.get("from") or "")
-        dst = _parse_hex_color(m.get("to") or "")
-        if src is None or dst is None:
-            raise InputError("Mappings must use #RRGGBB colors")
-        sr, sg, sb = src
-        dr, dg, db = dst
-        parsed.append((sr, sg, sb, dr, dg, db))
-
-    mapping_lua = ", ".join(
-        [f"{{{sr},{sg},{sb},{dr},{dg},{db}}}" for sr, sg, sb, dr, dg, db in parsed]
-    )
-    create_flag = "true" if create_missing_cels else "false"
-    source_idx = "nil" if source_frame_index is None else str(source_frame_index)
-    safe_layer_name = lua_escape(layer_name)
-
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local start_idx = {start_frame}
-    local end_idx = {end_frame}
-    if start_idx < 1 or end_idx > #spr.frames or start_idx > end_idx then
-        print("ERROR:Frame range out of bounds") return
-    end
-
-    {FIND_LAYER}
-    local target = find_layer(spr, "{safe_layer_name}")
-    if not target then print("ERROR:Layer not found") return end
-
-    local source_frame = {source_idx}
-    if source_frame == nil then
-        source_frame = start_idx
-    end
-    if source_frame < 1 or source_frame > #spr.frames then
-        print("ERROR:Source frame out of range") return
-    end
-
-    local map = {{ {mapping_lua} }}
-
-    app.transaction(function()
-        for fi = start_idx, end_idx do
-            local frame = spr.frames[fi]
-            local cel = target:cel(frame)
-            if not cel and {create_flag} then
-                local source_cel = target:cel(spr.frames[source_frame])
-                if source_cel then
-                    local img = source_cel.image:clone()
-                    cel = spr:newCel(target, frame, img, source_cel.position)
-                else
-                    local img = Image(spr.width, spr.height, spr.colorMode)
-                    cel = spr:newCel(target, frame, img, Point(0, 0))
-                end
-            end
-            if cel then
-                local img = cel.image
-                for y = 0, img.height - 1 do
-                    for x = 0, img.width - 1 do
-                        local c = img:getPixel(x, y)
-                        local r = app.pixelColor.rgbaR(c)
-                        local g = app.pixelColor.rgbaG(c)
-                        local b = app.pixelColor.rgbaB(c)
-                        local a = app.pixelColor.rgbaA(c)
-                        if a > 0 then
-                            for _, m in ipairs(map) do
-                                if r == m[1] and g == m[2] and b == m[3] then
-                                    local nc = app.pixelColor.rgba(m[4], m[5], m[6], a)
-                                    img:putPixel(x, y, nc)
-                                    break
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("palette.remap", filename, layer=layer_name, first=start_frame, last=end_frame,
+               mappings=[_mapping(m) for m in mappings], create_missing=create_missing_cels,
+               source_frame=source_frame_index)
     return (
         f"Remapped colors on '{layer_name}' frames {start_frame}-{end_frame} in {filename}"
     )
@@ -250,10 +128,10 @@ async def apply_palette_preset(filename: str, preset: str) -> str:
     colors = PALETTE_PRESETS.get(preset.lower())
     if colors is None:
         raise InputError(f"Unknown preset '{preset}'. Available: {', '.join(sorted(PALETTE_PRESETS))}")
-    result = await set_palette(filename, colors)
-    if result.startswith("Palette set"):
-        return f"Palette preset '{preset}' ({len(colors)} colors) applied to {filename}"
-    return result
+    require_file(filename)
+
+    await call("palette.set", filename, colors=[require_color(c) for c in colors])
+    return f"Palette preset '{preset}' ({len(colors)} colors) applied to {filename}"
 
 
 @mcp.tool()
@@ -279,9 +157,7 @@ async def generate_color_ramp(
     Returns:
         JSON array of hex colors ordered darkest to lightest.
     """
-    rgb = _parse_hex_color(base_color)
-    if rgb is None:
-        raise InputError(f"Invalid color value: {base_color}")
+    rgb = require_color(base_color)[:3]
     if not (2 <= steps <= 16):
         raise InputError("steps must be between 2 and 16")
     if not (0 <= lightness_range <= 1):
@@ -320,99 +196,14 @@ async def quantize_to_palette(
 
     Args:
         filename: Aseprite file to modify
-        layer_name: Layer to quantize (empty = all top-level layers)
+        layer_name: Layer to quantize (empty = every layer, including those inside groups)
         start_frame: First frame to process (default 1)
         end_frame: Last frame to process (default 0 = last frame)
     """
     require_file(filename)
 
-    safe_layer = lua_escape(layer_name)
-    script = f"""
-    {FIND_LAYER}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local ok, pal = pcall(function() return spr.palettes[1] end)
-    if not ok or not pal or #pal == 0 then print("ERROR:No palette") return end
-
-    local start_idx = {start_frame}
-    local end_idx = {end_frame}
-    if end_idx < 1 then end_idx = #spr.frames end
-    if start_idx < 1 or end_idx > #spr.frames or start_idx > end_idx then
-        print("ERROR:Frame range out of bounds") return
-    end
-
-    local layers = {{}}
-    if "{safe_layer}" ~= "" then
-        local target = find_layer(spr, "{safe_layer}")
-        if not target then print("ERROR:Layer not found") return end
-        table.insert(layers, target)
-    else
-        for _, layer in ipairs(spr.layers) do
-            if layer.isImage then table.insert(layers, layer) end
-        end
-    end
-
-    local colors = {{}}
-    for i = 0, #pal - 1 do
-        local c = pal:getColor(i)
-        table.insert(colors, {{c.red, c.green, c.blue}})
-    end
-
-    local cache = {{}}
-    local function nearest(r, g, b)
-        local key = r * 65536 + g * 256 + b
-        local hit = cache[key]
-        if hit then return hit end
-        local best, best_d = colors[1], math.huge
-        for _, c in ipairs(colors) do
-            local dr, dg, db = r - c[1], g - c[2], b - c[3]
-            local d = dr * dr + dg * dg + db * db
-            if d < best_d then best, best_d = c, d end
-        end
-        cache[key] = best
-        return best
-    end
-
-    local count = 0
-    app.transaction(function()
-        for _, layer in ipairs(layers) do
-            for fi = start_idx, end_idx do
-                local cel = layer:cel(spr.frames[fi])
-                if cel then
-                    local img = cel.image
-                    for py = 0, img.height - 1 do
-                        for px = 0, img.width - 1 do
-                            local v = img:getPixel(px, py)
-                            local a = app.pixelColor.rgbaA(v)
-                            if a > 0 then
-                                local r = app.pixelColor.rgbaR(v)
-                                local g = app.pixelColor.rgbaG(v)
-                                local b = app.pixelColor.rgbaB(v)
-                                local c = nearest(r, g, b)
-                                if c[1] ~= r or c[2] ~= g or c[3] ~= b then
-                                    img:putPixel(px, py, app.pixelColor.rgba(c[1], c[2], c[3], a))
-                                    count = count + 1
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-
-    spr:saveAs(spr.filename)
-    print("COUNT:" .. count)
-    """
-
-    output = await run_script(script, filename)
-
-    count = "?"
-    for line in output.splitlines():
-        if line.startswith("COUNT:"):
-            count = line[len("COUNT:"):]
-    return f"Quantized {count} pixels to the palette in {filename}"
+    result = await call("palette.quantize", filename, layer=layer_name or None, first=start_frame, last=end_frame)
+    return f"Quantized {result['count']} pixels to the palette in {filename}"
 
 
 @mcp.tool()
@@ -427,15 +218,5 @@ async def set_color_mode(filename: str, mode: str) -> str:
     if mode.lower() not in ("rgb", "grayscale", "indexed"):
         raise InputError("mode must be 'rgb', 'grayscale', or 'indexed'")
 
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    app.command.ChangePixelFormat {{ format = "{mode.lower()}" }}
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("palette.set_color_mode", filename, mode=mode.lower())
     return f"Color mode set to {mode} in {filename}"

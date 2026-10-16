@@ -23,19 +23,6 @@ local function progress(index, first, last)
   return (index - first) / (last - first)
 end
 
--- The cel on layer/frame. When there is none and `create` is set, make one:
--- a copy of the cel on `source_index` if that frame has one, else an empty
--- canvas-sized cel.
-local function ensure_cel(sprite, layer, frame, create, source_index)
-  local cel = layer:cel(frame)
-  if cel or not create then return cel end
-  local source = layer:cel(lib.frame(sprite, source_index, "Source frame out of range"))
-  if source then
-    return sprite:newCel(layer, frame, source.image:clone(), source.position)
-  end
-  return sprite:newCel(layer, frame, Image(sprite.width, sprite.height, sprite.colorMode), Point(0, 0))
-end
-
 -- A new last frame with `source`'s duration.
 local function append_frame_like(sprite, source)
   local frame = sprite:newEmptyFrame(#sprite.frames + 1)
@@ -117,7 +104,7 @@ end)
 lib.edit("animation.set_cel_position", function(sprite, a)
   local layer = lib.layer(sprite, a.name)
   local frame = lib.frame(sprite, a.frame)
-  local cel = ensure_cel(sprite, layer, frame, a.create_if_missing, a.source_frame or a.frame)
+  local cel = lib.ensure_cel(sprite, layer, frame, a.create_if_missing, a.source_frame or a.frame)
   if cel then cel.position = Point(a.x, a.y) end
 end)
 
@@ -192,7 +179,7 @@ local function tween(sprite, a, step)
   local ease = EASINGS[a.easing or "linear"] or lib.fail("UnknownEasing", "Unsupported easing " .. tostring(a.easing))
   for index = first, last do
     local t = progress(index, first, last)
-    local cel = ensure_cel(sprite, layer, sprite.frames[index], a.create_missing, a.source_frame or first)
+    local cel = lib.ensure_cel(sprite, layer, sprite.frames[index], a.create_missing, a.source_frame or first)
     if cel then step(cel, ease(t), t) end
   end
 end
