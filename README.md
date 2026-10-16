@@ -278,7 +278,7 @@ Batch-mode equivalents of what a human artist gets from the Aseprite UI.
 
 | Tool | Description |
 |------|-------------|
-| `run_lua_script` | Execute arbitrary Aseprite Lua ([API docs](https://www.aseprite.org/api/)) in batch mode. The escape hatch when no dedicated tool fits: one script can batch many operations into a single Aseprite launch. Remember to `spr:saveAs(spr.filename)` and `print()` your results. ⚠️ Runs unrestricted code on the host — only pass scripts you trust. |
+| `run_lua_script` | Execute arbitrary Aseprite Lua ([API docs](https://www.aseprite.org/api/)). The escape hatch when no dedicated tool fits: one script can run many operations in one call. Remember to `spr:saveAs(spr.filename)` and `print()` your results; sprites are closed and globals are dropped when the script ends. ⚠️ Runs unrestricted code on the host — only pass scripts you trust. |
 
 ## Recommended Workflow for LLMs
 
@@ -288,6 +288,17 @@ Batch-mode equivalents of what a human artist gets from the Aseprite UI.
 4. **Look at your work**: `export_frame` at 8×, inspect, fix, repeat. Use `get_color_stats` to keep the palette tight.
 5. **Shade with intent**: `adjust_hsl` for shadow layers, `apply_dither_gradient` for blends, `outline_cel` for readability.
 6. **Animate with the cel tools**: `propagate_cels`, then `tween_cel_positions_eased` / `oscillate_cel_positions`; verify with `render_onion_skin` and `compare_frames`; export with `export_tag`.
+
+## How it talks to Aseprite
+
+The server keeps one headless Aseprite running and sends it every tool call as a request on stdin. Starting Aseprite costs about 70 ms, so a warm process makes a typical tool call 14 to 20 times faster (about 4 to 5 ms instead of 70 to 75 ms).
+
+- **One request at a time.** Aseprite is single-threaded and most tools rewrite a file. Running requests in order through one process means two calls on the same file can't lose each other's changes.
+- **Every request starts from disk.** The file is opened at the start of a request and every sprite is closed at the end. Edits made in the Aseprite GUI or by git between calls are picked up, and nothing piles up in memory.
+- **Nothing carries over.** Globals and open sprites from one call are gone in the next. There is no "active layer" between calls, so pass the layer and frame to the tool that acts on them.
+- **Failures are errors.** A tool that fails returns an MCP error result (`isError`), not a success with error text in it.
+- **Timeouts.** A request that runs longer than `ASEPRITE_TIMEOUT` seconds (default 120) gets the process killed. The next call starts a new one, and a crash is handled the same way.
+- Exports that need Aseprite's command line (`--save-as`, `--sheet`) still start a separate Aseprite. They run in turn with the other requests.
 
 ## Docker Usage
 
@@ -354,6 +365,7 @@ scripts/docker-arch-build.sh        # builds aseprite-mcp:arch (ASEPRITE_PKG_DIR
 - Python 3.13+
 - `uv` package manager
 - Aseprite (set `ASEPRITE_PATH` in `.env` if it is not on your PATH)
+- Optional: `ASEPRITE_TIMEOUT` in `.env` caps how long one Aseprite run may take, in seconds (default 120)
 
 ### Installation:
 ```json

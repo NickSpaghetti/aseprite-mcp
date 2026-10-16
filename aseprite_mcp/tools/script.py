@@ -6,21 +6,27 @@ from .. import mcp
 
 @mcp.tool()
 async def run_lua_script(script: str, filename: str = "") -> str:
-    """Execute arbitrary Aseprite Lua code in batch mode (escape hatch).
+    """Execute arbitrary Aseprite Lua code (escape hatch).
 
     Use this when no dedicated tool covers what you need. The full API
     is documented at https://www.aseprite.org/api/. Anything the curated
     tools do can also be done here — they are Lua underneath.
 
-    Essentials for batch-mode scripts:
+    The script runs in the server's long-lived headless Aseprite:
     - When filename is given, it is opened first and available as
       app.activeSprite.
-    - Changes are NOT saved automatically; call spr:saveAs(spr.filename)
-      at the end if you modified the sprite.
-    - print() is the only way to return data; a clean exit does not mean
-      your logic succeeded, so print what you need to verify.
+    - Every sprite is closed when the script ends, and changes are NOT
+      saved automatically: call spr:saveAs(spr.filename) if you modified
+      the sprite.
+    - Nothing carries over to the next call. Globals you set and sprites
+      you open are gone, so each call starts from the files on disk.
+    - print() is how you return data. A Lua error fails the call with its
+      message; a script that runs cleanly can still have done the wrong
+      thing, so print what you need to verify.
     - Coordinates on cel images are cel-local: offset sprite-global
       coordinates by cel.position before getPixel/putPixel.
+    - A script that runs longer than ASEPRITE_TIMEOUT seconds (default
+      120) is killed.
 
     WARNING: this executes unrestricted code (including io/os access)
     on the host running Aseprite. Only pass scripts you trust.
