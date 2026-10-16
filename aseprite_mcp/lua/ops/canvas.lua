@@ -1,4 +1,4 @@
--- Canvas, frame and active-state ops (tools/canvas.py).
+-- Canvas, layer and frame ops (tools/canvas.py).
 local lib = ...
 
 lib.free("canvas.create", function(a)
@@ -24,20 +24,16 @@ lib.edit("canvas.add_frame", function(sprite)
   sprite:newFrame()
 end)
 
-lib.edit("canvas.set_frame", function(sprite, a)
-  app.activeFrame = lib.frame(sprite, a.frame)
+-- Aseprite keeps no active frame or layer between requests, so set_frame and
+-- set_layer only check; creating a missing layer goes through add_layer.
+lib.read("canvas.check_frame", function(sprite, a)
+  lib.frame(sprite, a.frame)
 end)
 
 lib.edit("canvas.set_frame_duration", function(sprite, a)
   lib.frame(sprite, a.frame).duration = a.duration_ms / 1000.0
 end)
 
-lib.edit("canvas.set_layer", function(sprite, a)
-  local target = lib.find_layer(sprite, a.name)
-  if not target then
-    if not a.create_if_missing then return end
-    target = sprite:newLayer()
-    target.name = a.name
-  end
-  app.activeLayer = target
+lib.read("canvas.layer_exists", function(sprite, a)
+  return { exists = lib.find_layer(sprite, a.name) ~= nil }
 end)

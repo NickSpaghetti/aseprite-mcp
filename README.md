@@ -56,9 +56,9 @@ Both were created end-to-end by Claude Fable 5 through this server's MCP tools â
 | `add_layer` | Add a new layer, optionally inside a named group |
 | `add_group` | Add a new (optionally nested) group layer |
 | `add_frame` | Append a new frame |
-| `set_frame` | Set the active frame |
+| `set_frame` | Check a frame exists (Aseprite keeps no active frame between calls) |
 | `set_frame_duration` | Set one frame's duration in ms |
-| `set_layer` | Set the active layer (optionally creating it) |
+| `set_layer` | Check a layer exists, optionally creating it (there is no active layer between calls) |
 
 ### Drawing
 
