@@ -1,9 +1,10 @@
 from typing import List
-from ..core.commands import lua_escape, run_script
+
+from ..core.commands import call
 from ..core.boundary import require_file, require_safe_path
 from ..core.errors import InputError
-from ..core.lua import FIND_LAYER
 from .. import mcp
+
 
 @mcp.tool()
 async def copy_layers_between_sprites(
@@ -29,86 +30,9 @@ async def copy_layers_between_sprites(
     require_safe_path(source_filename)
     require_safe_path(target_filename)
 
-    src_path = lua_escape(source_filename.replace("\\", "/"))
-    dst_path = lua_escape(target_filename.replace("\\", "/"))
-    replace_flag = "true" if replace else "false"
-    create_frames_flag = "true" if create_missing_frames else "false"
-    layers_lua = "{" + ",".join([f"\"{lua_escape(name)}\"" for name in layer_names]) + "}"
-
-    script = f"""
-    local src = app.open("{src_path}")
-    if not src then print("ERROR:Source sprite not opened") return end
-    local dst = app.open("{dst_path}")
-    if not dst then print("ERROR:Target sprite not opened") return end
-
-    {FIND_LAYER}
-
-    local names = {layers_lua}
-    local missing = {{}}
-    local valid = {{}}
-    for _, name in ipairs(names) do
-        if find_layer(src, name) then
-            table.insert(valid, name)
-        else
-            table.insert(missing, name)
-        end
-    end
-    if #valid == 0 then
-        print("ERROR:None of the requested layers exist in the source: " .. table.concat(missing, ", ")) return
-    end
-
-    app.transaction(function()
-        if {create_frames_flag} then
-            while #dst.frames < #src.frames do
-                dst:newFrame()
-            end
-        end
-
-        for _, name in ipairs(valid) do
-            local src_layer = find_layer(src, name)
-            local dst_layer = find_layer(dst, name)
-            if not dst_layer then
-                dst_layer = dst:newLayer()
-                dst_layer.name = name
-            end
-            if {replace_flag} then
-                for i = 1, #dst.frames do
-                    local cel = dst_layer:cel(dst.frames[i])
-                    if cel then dst:deleteCel(cel) end
-                end
-            end
-            for i = 1, #src.frames do
-                if i <= #dst.frames then
-                    local src_cel = src_layer:cel(src.frames[i])
-                    if src_cel then
-                        local dst_cel = dst_layer:cel(dst.frames[i])
-                        if dst_cel and {replace_flag} then
-                            dst:deleteCel(dst_cel)
-                            dst_cel = nil
-                        end
-                        if not dst_cel then
-                            local img = src_cel.image:clone()
-                            dst:newCel(dst_layer, dst.frames[i], img, src_cel.position)
-                        end
-                    end
-                end
-            end
-        end
-    end)
-
-    dst:saveAs(dst.filename)
-    if #missing > 0 then
-        print("MISSING:" .. table.concat(missing, ", "))
-    end
-    print("OK")
-    """
-
-    output = await run_script(script)
-    missing = next(
-        (line[len("MISSING:"):] for line in output.splitlines() if line.startswith("MISSING:")),
-        None,
-    )
+    result = await call("scene.copy_layers", source=source_filename, target=target_filename, names=layer_names,
+                        replace=replace, create_missing_frames=create_missing_frames)
     msg = f"Layers copied from {source_filename} to {target_filename}"
-    if missing:
-        msg += f" (skipped missing layers: {missing})"
+    if result["missing"]:
+        msg += f" (skipped missing layers: {', '.join(result['missing'])})"
     return msg
