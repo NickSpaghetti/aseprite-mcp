@@ -1,9 +1,8 @@
-"""Shared hex-colour parsing for tool modules.
+"""The one hex-colour parser.
 
 Accepts #RGB, #RGBA, #RRGGBB, #RRGGBBAA (with or without the leading '#')
-and returns (r, g, b, a). Alpha defaults to 255 when not supplied. This is
-the single source of truth that replaces the per-module _parse_hex_color
-copies (which only handled #RRGGBB and hardcoded full alpha).
+and returns (r, g, b, a). Alpha defaults to 255 when not supplied. Tools
+reach it through core.boundary.require_color, which raises InputError.
 """
 
 

@@ -1,17 +1,9 @@
 import json
-from ..core.commands import lua_escape, run_script
+
+from ..core.commands import call
 from ..core.boundary import require_file
 from ..core.errors import InputError
 from .. import mcp
-
-_FIND_SLICE = """
-local function find_slice(spr, name)
-    for _, slice in ipairs(spr.slices) do
-        if slice.name == name then return slice end
-    end
-    return nil
-end
-"""
 
 
 @mcp.tool()
@@ -39,24 +31,7 @@ async def create_slice(
     if not name:
         raise InputError("Slice name cannot be empty")
 
-    safe_name = lua_escape(name)
-    script = f"""
-    {_FIND_SLICE}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    if find_slice(spr, "{safe_name}") then print("ERROR:Slice with that name already exists") return end
-
-    app.transaction(function()
-        local slice = spr:newSlice(Rectangle({x}, {y}, {width}, {height}))
-        slice.name = "{safe_name}"
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("slices.create", filename, name=name, x=x, y=y, width=width, height=height)
     return f"Slice '{name}' created at ({x},{y}) {width}x{height} in {filename}"
 
 
@@ -86,24 +61,7 @@ async def set_slice_center(
     if width <= 0 or height <= 0:
         raise InputError("Width and height must be > 0")
 
-    safe_name = lua_escape(name)
-    script = f"""
-    {_FIND_SLICE}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local slice = find_slice(spr, "{safe_name}")
-    if not slice then print("ERROR:Slice not found") return end
-
-    app.transaction(function()
-        slice.center = Rectangle({x}, {y}, {width}, {height})
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("slices.set_center", filename, name=name, x=x, y=y, width=width, height=height)
     return f"Slice '{name}' 9-patch center set to ({x},{y}) {width}x{height} in {filename}"
 
 
@@ -119,24 +77,7 @@ async def set_slice_pivot(filename: str, name: str, x: int, y: int) -> str:
     """
     require_file(filename)
 
-    safe_name = lua_escape(name)
-    script = f"""
-    {_FIND_SLICE}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local slice = find_slice(spr, "{safe_name}")
-    if not slice then print("ERROR:Slice not found") return end
-
-    app.transaction(function()
-        slice.pivot = Point({x}, {y})
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("slices.set_pivot", filename, name=name, x=x, y=y)
     return f"Slice '{name}' pivot set to ({x},{y}) in {filename}"
 
 
@@ -149,38 +90,9 @@ async def list_slices(filename: str) -> str:
     """
     require_file(filename)
 
-    # Emit one JSON object per slice (name via Lua %q) instead of a
-    # '|'-delimited line, so a '|' (or comma/colon) in a slice name can no
-    # longer break the parse for the whole sprite.
-    script = """
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    for _, slice in ipairs(spr.slices) do
-        local b = slice.bounds
-        local parts = {}
-        parts[#parts + 1] = string.format('"name":%s', string.format("%q", slice.name))
-        parts[#parts + 1] = string.format('"x":%d,"y":%d,"width":%d,"height":%d', b.x, b.y, b.width, b.height)
-        if slice.center then
-            local c = slice.center
-            parts[#parts + 1] = string.format('"center":{"x":%d,"y":%d,"width":%d,"height":%d}', c.x, c.y, c.width, c.height)
-        end
-        if slice.pivot then
-            parts[#parts + 1] = string.format('"pivot":{"x":%d,"y":%d}', slice.pivot.x, slice.pivot.y)
-        end
-        print("SLICE:{" .. table.concat(parts, ",") .. "}")
-    end
-    print("DONE")
-    """
-
-    output = await run_script(script, filename)
-
-    slices = []
-    for line in output.splitlines():
-        if not line.startswith("SLICE:"):
-            continue
-        slices.append(json.loads(line[len("SLICE:"):]))
-    return json.dumps(slices)
+    result = await call("slices.list", filename)
+    keys = ("name", "x", "y", "width", "height", "center", "pivot")
+    return json.dumps([{k: s[k] for k in keys if k in s} for s in result["slices"]])
 
 
 @mcp.tool()
@@ -193,22 +105,5 @@ async def delete_slice(filename: str, name: str) -> str:
     """
     require_file(filename)
 
-    safe_name = lua_escape(name)
-    script = f"""
-    {_FIND_SLICE}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local slice = find_slice(spr, "{safe_name}")
-    if not slice then print("ERROR:Slice not found") return end
-
-    app.transaction(function()
-        spr:deleteSlice(slice)
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("slices.delete", filename, name=name)
     return f"Slice '{name}' deleted from {filename}"

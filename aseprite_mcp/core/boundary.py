@@ -33,11 +33,17 @@ def require_color(value: str, field: str = "color") -> list[int]:
     return list(rgba)
 
 
-def require_point(item: Any, what: str = "point") -> list[int]:
-    """Parse {"x": int, "y": int} into [x, y]. Bools, floats and strings are rejected."""
+def require_ints(item: Any, keys: tuple[str, ...], what: str) -> list[int]:
+    """Parse an object's integer fields, in `keys` order. Bools, floats and strings are rejected."""
+    names = " and ".join(keys)
     if not isinstance(item, dict):
-        raise InputError(f"Each {what} must be an object with integer x and y, got {item!r}")
-    coords = [item.get("x"), item.get("y")]
-    if not all(type(c) is int for c in coords):
-        raise InputError(f"Each {what} needs integer x and y, got {item!r}")
-    return coords
+        raise InputError(f"Each {what} must be an object with integer {names}, got {item!r}")
+    values = [item.get(key) for key in keys]
+    if not all(type(v) is int for v in values):
+        raise InputError(f"Each {what} needs integer {names}, got {item!r}")
+    return values
+
+
+def require_point(item: Any, what: str = "point") -> list[int]:
+    """Parse {"x": int, "y": int} into [x, y]."""
+    return require_ints(item, ("x", "y"), what)
