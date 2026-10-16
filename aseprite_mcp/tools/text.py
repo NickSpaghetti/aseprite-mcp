@@ -4,17 +4,11 @@ Aseprite exposes no text API to Lua, so glyphs are rasterised here and the
 result is blitted into the sprite as an image.
 """
 
-import os
-import tempfile
 from typing import Optional
 
-from PIL import Image
-
-from ..core.commands import lua_escape, run_script
-from ..core.boundary import require_file
+from ..core.commands import call
+from ..core.boundary import require_color, require_file
 from ..core.errors import InputError
-from ..core.colors import parse_hex_color
-from ..core.lua import FIND_LAYER, NORMALIZE_CEL
 from ..core import fonts as fontlib
 from .. import mcp
 
@@ -48,6 +42,53 @@ def _text_origin(anchor: str, x: int, y: int, metrics: dict) -> tuple[int, int]:
     elif anchor in ("left", "center", "right"):
         y -= height // 2
     return origin_x, y - metrics["top"]
+
+
+def _compose_stamp(
+    ink: set,
+    fill: list[int],
+    outline: list[int] | None = None,
+    outline_width: int = 1,
+    outline_diagonal: bool = True,
+    shadow: list[int] | None = None,
+    shadow_dx: int = 1,
+    shadow_dy: int = 1,
+) -> dict:
+    """Layer shadow, outline and ink into one stamp.
+
+    `ink` is a set of (x, y) relative to the pen origin. Returns the stamp's
+    offset from the pen origin (`left`, `top`), its `width` and `height`, and
+    `pixels` as [x, y, colour_index] inside the stamp with `colors` holding
+    the RGBA per index. Back to front: shadow, then outline, then ink.
+    """
+    rim = set()
+    if outline:
+        rim = set(ink)
+        for _ in range(max(1, outline_width)):
+            grown = set(rim)
+            for px, py in rim:
+                grown.update({(px - 1, py), (px + 1, py), (px, py - 1), (px, py + 1)})
+                if outline_diagonal:
+                    grown.update({(px - 1, py - 1), (px + 1, py - 1), (px - 1, py + 1), (px + 1, py + 1)})
+            rim = grown
+        rim -= ink
+    drop = {(px + shadow_dx, py + shadow_dy) for px, py in ink} - ink - rim if shadow else set()
+
+    everything = ink | rim | drop
+    left = min(p[0] for p in everything)
+    top = min(p[1] for p in everything)
+    colors, pixels = [], []
+    for points, rgba in ((drop, shadow), (rim, outline), (ink, fill)):
+        if not points:
+            continue
+        colors.append(rgba)
+        pixels += [[x - left, y - top, len(colors)] for x, y in sorted(points)]
+    return {
+        "left": left, "top": top,
+        "width": max(p[0] for p in everything) - left + 1,
+        "height": max(p[1] for p in everything) - top + 1,
+        "pixels": pixels, "colors": colors,
+    }
 
 
 @mcp.tool()
@@ -174,20 +215,9 @@ async def draw_text(
     require_file(filename)
     if anchor not in _ANCHORS:
         raise InputError(f"Invalid anchor '{anchor}'. Expected one of: {', '.join(sorted(_ANCHORS))}")
-
-    fill = parse_hex_color(color)
-    if fill is None:
-        raise InputError(f"Invalid color value: {color}")
-    outline_rgba = None
-    if outline_color:
-        outline_rgba = parse_hex_color(outline_color)
-        if outline_rgba is None:
-            raise InputError(f"Invalid outline_color value: {outline_color}")
-    shadow_rgba = None
-    if shadow_color:
-        shadow_rgba = parse_hex_color(shadow_color)
-        if shadow_rgba is None:
-            raise InputError(f"Invalid shadow_color value: {shadow_color}")
+    fill = require_color(color)
+    outline_rgba = require_color(outline_color, "outline_color") if outline_color else None
+    shadow_rgba = require_color(shadow_color, "shadow_color") if shadow_color else None
 
     try:
         f = fontlib.load_font(font)
@@ -197,94 +227,15 @@ async def draw_text(
     if not ink:
         return "OK: nothing to draw (text has no visible glyphs)"
 
-    # Build the layers of the stamp, back to front.
-    outline = set()
-    if outline_rgba:
-        outline = set(ink)
-        for _ in range(max(1, outline_width)):
-            grown = set(outline)
-            for px, py in outline:
-                grown.update({(px - 1, py), (px + 1, py), (px, py - 1), (px, py + 1)})
-                if outline_diagonal:
-                    grown.update({(px - 1, py - 1), (px + 1, py - 1),
-                                  (px - 1, py + 1), (px + 1, py + 1)})
-            outline = grown
-        outline -= ink
-    shadow = {(px + shadow_dx, py + shadow_dy) for px, py in ink} if shadow_rgba else set()
-    shadow -= ink | outline
-
-    everything = ink | outline | shadow
-    min_x = min(p[0] for p in everything)
-    min_y = min(p[1] for p in everything)
-    max_x = max(p[0] for p in everything)
-    max_y = max(p[1] for p in everything)
-    w, h = max_x - min_x + 1, max_y - min_y + 1
-
+    stamp = _compose_stamp(ink, fill, outline_rgba, outline_width, outline_diagonal,
+                           shadow_rgba, shadow_dx, shadow_dy)
     # The anchor is resolved against the glyph box alone, so adding an outline
     # or a shadow never shifts where the letters themselves land.
     origin_x, origin_y = _text_origin(anchor, x, y, metrics)
+    blit_x, blit_y = origin_x + stamp["left"], origin_y + stamp["top"]
 
-    stamp = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    px = stamp.load()
-    for group, rgba in ((shadow, shadow_rgba), (outline, outline_rgba), (ink, fill)):
-        if not rgba:
-            continue
-        for gx, gy in group:
-            px[gx - min_x, gy - min_y] = rgba
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-    tmp.close()
-    stamp.save(tmp.name)
-
-    blit_x = origin_x + min_x
-    blit_y = origin_y + min_y
-    safe_png = lua_escape(os.path.abspath(tmp.name).replace("\\", "/"))
-    layer_lookup = (
-        f'local target = find_layer(spr, "{lua_escape(layer_name)}")'
-        if layer_name else
-        "local target = app.activeLayer or spr.layers[1]"
-    )
-    create_layer = (
-        f'''
-        if not target then
-            if not {str(create_if_missing).lower()} then print("ERROR:Layer not found") return end
-            target = spr:newLayer()
-            target.name = "{lua_escape(layer_name)}"
-        end''' if layer_name else
-        '''
-        if not target then print("ERROR:No layer to draw on") return end'''
-    )
-
-    script = f"""
-    {FIND_LAYER}
-    {NORMALIZE_CEL}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then print("ERROR:Frame index out of range") return end
-
-    local stamp = Image{{ fromFile = "{safe_png}" }}
-    if not stamp then print("ERROR:Could not load rendered text") return end
-
-    {layer_lookup}
-    app.transaction(function()
-        {create_layer}
-        local cel = normalize_cel(spr, target, spr.frames[idx], true)
-        cel.image:drawImage(stamp, Point({blit_x}, {blit_y}), 255, BlendMode.NORMAL)
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    try:
-        await run_script(script, filename)
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
-
+    await call("text.draw", filename, layer=layer_name or None, frame=frame_index, create=create_if_missing,
+               x=blit_x, y=blit_y, width=stamp["width"], height=stamp["height"],
+               pixels=stamp["pixels"], colors=stamp["colors"])
     return (f"Drew '{text}' at ({blit_x}, {blit_y}), "
-            f"text box {metrics['width']}x{metrics['height']}, stamp {w}x{h}")
+            f"text box {metrics['width']}x{metrics['height']}, stamp {stamp['width']}x{stamp['height']}")

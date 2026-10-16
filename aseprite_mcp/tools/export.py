@@ -1,10 +1,36 @@
 import glob
 import os
-from ..core.commands import lua_escape, run_script, run_cli
+
+from ..core.commands import call, run_cli
 from ..core.boundary import require_file, require_safe_path
 from ..core.errors import AsepriteError, InputError
-from ..core.lua import FIND_LAYER, NORMALIZE_CEL
 from .. import mcp
+
+
+def _pattern(path: str, wildcard: str = "") -> str:
+    """A glob for `path` (plus an optional wildcard before its extension) that
+    treats every character of the path literally."""
+    base, ext = os.path.splitext(path)
+    return glob.escape(base) + wildcard + glob.escape(ext)
+
+
+def _snapshot(pattern: str) -> dict[str, int]:
+    return {p: os.stat(p).st_mtime_ns for p in glob.glob(pattern)}
+
+
+def _written(before: dict[str, int], pattern: str) -> list[str]:
+    """Files matching `pattern` that are new or changed since `before`.
+
+    Aseprite exits 0 even when it writes nothing, and a file left over from an
+    earlier export is not proof this one worked.
+    """
+    return sorted(p for p, mtime in _snapshot(pattern).items() if before.get(p) != mtime)
+
+
+async def _tag_range(filename: str, tag_name: str) -> tuple[int, int]:
+    result = await call("export.tag_range", filename, name=tag_name)
+    return result["first"], result["last"]
+
 
 @mcp.tool()
 async def export_sprite(filename: str, output_filename: str, format: str = "png") -> str:
@@ -16,33 +42,25 @@ async def export_sprite(filename: str, output_filename: str, format: str = "png"
         format: Output format (default: "png", can be "png", "gif", "jpg", etc.)
     """
     require_file(filename)
-    
+
     # Make sure format is lowercase
     format = format.lower()
-    
+
     # Ensure output filename has the correct extension
     if not output_filename.lower().endswith(f".{format}"):
         output_filename = f"{output_filename}.{format}"
-    
-    # For animated exports
-    if format == "gif":
-        args = ["--batch", filename, "--save-as", output_filename]
-        await run_cli(args)
-    else:
-        # For still image exports
-        args = ["--batch", filename, "--save-as", output_filename]
-        await run_cli(args)
+    require_safe_path(output_filename)
 
-    # Aseprite exits 0 even when it cannot write the requested format
-    # (e.g. format="json"). Confirm a file actually appeared. A multi-frame
-    # sprite saved to a still format produces frame-numbered siblings
-    # (out1.png, out2.png, ...) instead of the exact name, so accept those
-    # too — same convention as export_frame.
-    base, ext = os.path.splitext(output_filename)
-    if not os.path.exists(output_filename) and not glob.glob(f"{base}*{ext}"):
+    # A multi-frame sprite saved to a still format produces frame-numbered
+    # siblings (out1.png, out2.png, ...) instead of the exact name, so those count.
+    pattern = _pattern(output_filename, "*")
+    before = _snapshot(pattern)
+    await run_cli(["--batch", filename, "--save-as", output_filename])
+    if not _written(before, pattern):
         raise AsepriteError("Aseprite exited 0 but wrote no file (the format may not be writable via --save-as)")
 
     return f"Sprite exported successfully to {output_filename}"
+
 
 @mcp.tool()
 async def copy_sprite(filename: str, output_filename: str, overwrite: bool = False) -> str:
@@ -63,17 +81,9 @@ async def copy_sprite(filename: str, output_filename: str, overwrite: bool = Fal
     if os.path.exists(output_filename) and not overwrite:
         raise InputError(f"Output file {output_filename} already exists")
 
-    safe_path = lua_escape(output_filename.replace("\\", "/"))
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    spr:saveAs("{safe_path}")
-    print("OK")
-    """
-
-    await run_script(script, filename)
-    if not os.path.exists(output_filename):
+    before = _snapshot(_pattern(output_filename))
+    await call("export.copy", filename, output=os.path.abspath(output_filename))
+    if not _written(before, _pattern(output_filename)):
         raise AsepriteError("Aseprite exited 0 but wrote no file")
     return f"Sprite copied to {output_filename}"
 
@@ -103,24 +113,23 @@ async def export_frame(
     if not output_filename.lower().endswith(".png"):
         output_filename = f"{output_filename}.png"
 
+    pattern = _pattern(output_filename, "*")
+    before = _snapshot(pattern)
     f0 = frame_index - 1  # CLI --frame-range is 0-based
-    args = [
+    await run_cli([
         "--batch", filename,
         "--frame-range", f"{f0},{f0}",
         "--scale", str(scale),
         "--save-as", output_filename,
-    ]
-    await run_cli(args)
+    ])
 
     # With multi-frame sprites Aseprite may append the frame number to
     # the filename; rename the produced file when that happens.
-    if not os.path.exists(output_filename):
-        base, ext = os.path.splitext(output_filename)
-        candidates = sorted(glob.glob(f"{base}*{ext}"))
-        if candidates:
-            os.replace(candidates[0], output_filename)
-        else:
+    written = _written(before, pattern)
+    if output_filename not in written:
+        if not written:
             raise AsepriteError(f"Export reported success but {output_filename} was not created")
+        os.replace(written[0], output_filename)
     return f"Frame {frame_index} exported to {output_filename} at {scale}x"
 
 
@@ -161,32 +170,16 @@ async def export_spritesheet(
     require_safe_path(output_filename)
     if not output_filename.lower().endswith(".png"):
         output_filename = f"{output_filename}.png"
+    if data_filename:
+        require_safe_path(data_filename)
 
     args = ["--batch"]
     if tag_name:
-        # Frame filters only apply to --sheet when they appear before
-        # the input file; resolve the tag to a 0-based --frame-range so
-        # missing tags produce a clear error.
-        safe_tag = lua_escape(tag_name)
-        script = f"""
-        local spr = app.activeSprite
-        if not spr then print("ERROR:No active sprite") return end
-        for _, tag in ipairs(spr.tags) do
-            if tag.name == "{safe_tag}" then
-                print("RANGE:" .. (tag.fromFrame.frameNumber - 1) .. "," .. (tag.toFrame.frameNumber - 1))
-                return
-            end
-        end
-        print("ERROR:Tag not found")
-        """
-        out = await run_script(script, filename)
-        frame_range = next(
-            (line[len("RANGE:"):] for line in out.splitlines() if line.startswith("RANGE:")),
-            None,
-        )
-        if frame_range is None:
-            raise AsepriteError("Failed to resolve tag: no range returned")
-        args += ["--frame-range", frame_range]
+        # Frame filters only apply to --sheet when they appear before the
+        # input file; resolve the tag to a 0-based --frame-range so a missing
+        # tag fails clearly instead of exporting every frame.
+        first, last = await _tag_range(filename, tag_name)
+        args += ["--frame-range", f"{first - 1},{last - 1}"]
     args.append(filename)
     if scale > 1:
         args += ["--scale", str(scale)]
@@ -194,16 +187,17 @@ async def export_spritesheet(
     if padding > 0:
         args += ["--shape-padding", str(padding)]
     if data_filename:
-        require_safe_path(data_filename)
         args += ["--data", data_filename, "--format", data_format]
         if list_tags:
             args.append("--list-tags")
     args += ["--sheet", output_filename]
 
+    sheet_before = _snapshot(_pattern(output_filename))
+    data_before = _snapshot(_pattern(data_filename)) if data_filename else {}
     await run_cli(args)
-    if not os.path.exists(output_filename):
+    if not _written(sheet_before, _pattern(output_filename)):
         raise AsepriteError("Aseprite exited 0 but wrote no sheet file")
-    if data_filename and not os.path.exists(data_filename):
+    if data_filename and not _written(data_before, _pattern(data_filename)):
         raise AsepriteError("Aseprite exited 0 but wrote no data file")
     msg = f"Sprite sheet exported to {output_filename} ({sheet_type})"
     if data_filename:
@@ -228,6 +222,8 @@ async def export_layers(
     require_safe_path(output_directory)
     os.makedirs(output_directory, exist_ok=True)
 
+    pattern = os.path.join(glob.escape(output_directory), "*.png")
+    before = _snapshot(pattern)
     args = ["--batch"]
     if include_hidden:
         args.append("--all-layers")
@@ -236,9 +232,7 @@ async def export_layers(
         "--save-as", os.path.join(output_directory, "{layer}.png"),
     ]
     await run_cli(args)
-    produced = sorted(
-        os.path.basename(p) for p in glob.glob(os.path.join(output_directory, "*.png"))
-    )
+    produced = [os.path.basename(p) for p in _written(before, pattern)]
     if not produced:
         raise AsepriteError("Failed to export layers: Aseprite exited 0 but wrote no PNG files")
     return f"Layers exported to {output_directory}: {', '.join(produced)}"
@@ -265,29 +259,19 @@ async def export_tag(
     require_safe_path(output_filename)
 
     # --tag silently exports *all* frames (exit 0) when the tag does not
-    # exist, so a produced file is not proof the tag was honoured. Validate
-    # the tag up front — same approach as export_spritesheet.
-    safe_tag = lua_escape(tag_name)
-    check = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-    for _, tag in ipairs(spr.tags) do
-        if tag.name == "{safe_tag}" then print("OK") return end
-    end
-    print("ERROR:Tag not found")
-    """
-    await run_script(check, filename)
+    # exist, so a produced file is not proof the tag was honoured.
+    await _tag_range(filename, tag_name)
 
     args = ["--batch", filename, "--tag", tag_name]
     if scale > 1:
         args += ["--scale", str(scale)]
     args += ["--save-as", output_filename]
-    await run_cli(args)
     # A multi-frame tag saved to a still format produces frame-numbered
-    # siblings instead of the exact name — accept those, same convention
-    # as export_sprite/export_frame.
-    base, ext = os.path.splitext(output_filename)
-    if not os.path.exists(output_filename) and not glob.glob(f"{base}*{ext}"):
+    # siblings instead of the exact name; those count.
+    pattern = _pattern(output_filename, "*")
+    before = _snapshot(pattern)
+    await run_cli(args)
+    if not _written(before, pattern):
         raise AsepriteError("Aseprite exited 0 but wrote no file")
     return f"Tag '{tag_name}' exported to {output_filename}"
 
@@ -319,33 +303,6 @@ async def import_image_as_layer(
     if not os.path.exists(image_path):
         raise InputError(f"Image {image_path} not found")
 
-    safe_layer = lua_escape(layer_name)
-    safe_image = lua_escape(os.path.abspath(image_path).replace("\\", "/"))
-    script = f"""
-    {FIND_LAYER}
-    {NORMALIZE_CEL}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then print("ERROR:Frame index out of range") return end
-
-    local src = Image{{ fromFile = "{safe_image}" }}
-    if not src then print("ERROR:Could not load image") return end
-
-    local target = find_layer(spr, "{safe_layer}")
-    app.transaction(function()
-        if not target then
-            target = spr:newLayer()
-            target.name = "{safe_layer}"
-        end
-        local cel = normalize_cel(spr, target, spr.frames[idx], true)
-        cel.image:drawImage(src, Point({x}, {y}))
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("export.import_image", filename, path=os.path.abspath(image_path), layer=layer_name,
+               frame=frame_index, x=x, y=y)
     return f"Image {image_path} imported onto '{layer_name}' frame {frame_index} in {filename}"
