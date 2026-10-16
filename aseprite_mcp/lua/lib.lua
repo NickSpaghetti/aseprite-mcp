@@ -76,6 +76,33 @@ function lib.group(sprite, name, not_found_message)
   return group
 end
 
-function lib.frame(sprite, index)
-  return sprite.frames[index] or lib.fail("FrameOutOfRange", "Frame index out of range")
+function lib.frame(sprite, index, message)
+  return sprite.frames[index] or lib.fail("FrameOutOfRange", message or "Frame index out of range")
+end
+
+-- Validates an inclusive 1-based range and returns its bounds.
+function lib.frame_range(sprite, first, last)
+  if first < 1 or last > #sprite.frames or first > last then
+    lib.fail("FrameRangeOutOfBounds", "Frame range out of bounds")
+  end
+  return first, last
+end
+
+function lib.find_tag(sprite, name)
+  for _, tag in ipairs(sprite.tags) do
+    if tag.name == name then return tag end
+  end
+  return nil
+end
+
+-- Every layer that can hold cels, including those inside groups, bottom to top.
+function lib.image_layers(sprite)
+  local found = {}
+  local function walk(layers)
+    for _, layer in ipairs(layers) do
+      if layer.isGroup then walk(layer.layers) else found[#found + 1] = layer end
+    end
+  end
+  walk(sprite.layers)
+  return found
 end
