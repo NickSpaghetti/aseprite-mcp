@@ -208,3 +208,17 @@ end
 function lib.default_target(sprite)
   return app.activeLayer or sprite.layers[1], sprite.frames[1]
 end
+
+-- What frame `index` looks like: every visible layer composited into a new
+-- canvas-sized RGB image (hidden layers, opacity and blend modes respected).
+function lib.composite(sprite, index)
+  local image = Image(sprite.width, sprite.height, ColorMode.RGB)
+  image:drawSprite(sprite, index)
+  return image
+end
+
+-- A pixel value as {r, g, b, a}.
+function lib.rgba(v)
+  local pc = app.pixelColor
+  return { pc.rgbaR(v), pc.rgbaG(v), pc.rgbaB(v), pc.rgbaA(v) }
+end

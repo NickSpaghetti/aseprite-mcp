@@ -1,31 +1,10 @@
 import json
 import os
-from ..core.commands import lua_escape, run_script
-from ..core.boundary import require_file, require_safe_path
-from ..core.errors import AsepriteError, InputError
-from .. import mcp
 
-# Render a frame of the (cloned, flattened) sprite into a canvas-sized
-# RGB image. Used by the analysis tools so layer offsets and trimmed
-# cels do not skew results.
-_FLATTEN_FRAME = """
-local function flatten_frame(clone, frame_idx, bg)
-    local layer = clone.layers[#clone.layers]
-    local img = Image(clone.width, clone.height, ColorMode.RGB)
-    if bg then
-        for py = 0, img.height - 1 do
-            for px = 0, img.width - 1 do
-                img:putPixel(px, py, bg)
-            end
-        end
-    end
-    local cel = layer:cel(clone.frames[frame_idx])
-    if cel then
-        img:drawImage(cel.image, cel.position)
-    end
-    return img
-end
-"""
+from ..core.commands import call
+from ..core.boundary import require_file, require_safe_path
+from ..core.errors import InputError
+from .. import mcp
 
 
 @mcp.tool()
@@ -66,59 +45,8 @@ async def render_onion_skin(
     if not output_filename.lower().endswith(".png"):
         output_filename = f"{output_filename}.png"
 
-    safe_out = lua_escape(os.path.abspath(output_filename).replace("\\", "/"))
-    script = f"""
-    {_FLATTEN_FRAME}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then print("ERROR:Frame index out of range") return end
-
-    local clone = Sprite(spr)
-    clone:flatten()
-
-    local white = app.pixelColor.rgba(255, 255, 255, 255)
-    local comp = Image(clone.width, clone.height, ColorMode.RGB)
-    for py = 0, comp.height - 1 do
-        for px = 0, comp.width - 1 do
-            comp:putPixel(px, py, white)
-        end
-    end
-
-    -- Ghosts: oldest first so closer frames draw on top
-    for offset = {before}, 1, -1 do
-        local fi = idx - offset
-        if fi >= 1 then
-            comp:drawImage(flatten_frame(clone, fi, nil), Point(0, 0), {ghost_opacity}, BlendMode.NORMAL)
-        end
-    end
-    for offset = {after}, 1, -1 do
-        local fi = idx + offset
-        if fi <= #clone.frames then
-            comp:drawImage(flatten_frame(clone, fi, nil), Point(0, 0), {ghost_opacity}, BlendMode.NORMAL)
-        end
-    end
-    comp:drawImage(flatten_frame(clone, idx, nil), Point(0, 0), 255, BlendMode.NORMAL)
-
-    local s = {scale}
-    local big = Image(comp.width * s, comp.height * s, ColorMode.RGB)
-    for py = 0, comp.height - 1 do
-        for px = 0, comp.width - 1 do
-            local v = comp:getPixel(px, py)
-            for oy = 0, s - 1 do
-                for ox = 0, s - 1 do
-                    big:putPixel(px * s + ox, py * s + oy, v)
-                end
-            end
-        end
-    end
-
-    big:saveAs("{safe_out}")
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("analysis.onion_skin", filename, frame=frame_index, before=before, after=after, scale=scale,
+               ghost_opacity=ghost_opacity, output=os.path.abspath(output_filename))
     return (
         f"Onion-skin render of frame {frame_index} "
         f"(-{before}/+{after} ghosts) saved to {output_filename} at {scale}x"
@@ -129,8 +57,8 @@ async def render_onion_skin(
 async def compare_frames(filename: str, frame_a: int, frame_b: int) -> str:
     """Compare two frames and report how much they differ.
 
-    Flattens the sprite (non-destructively) and diffs the two frames
-    pixel by pixel. Use while animating to confirm a frame actually
+    Composites each frame's visible layers (non-destructively; hidden
+    layers are left out) and diffs the two frames pixel by pixel. Use while animating to confirm a frame actually
     changed, or that it did not change too much.
 
     Args:
@@ -144,86 +72,26 @@ async def compare_frames(filename: str, frame_a: int, frame_b: int) -> str:
     """
     require_file(filename)
 
-    script = f"""
-    {_FLATTEN_FRAME}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local a = {frame_a}
-    local b = {frame_b}
-    if a < 1 or a > #spr.frames or b < 1 or b > #spr.frames then
-        print("ERROR:Frame index out of range") return
-    end
-
-    local clone = Sprite(spr)
-    clone:flatten()
-
-    local img_a = flatten_frame(clone, a, nil)
-    local img_b = flatten_frame(clone, b, nil)
-
-    local changed = 0
-    local min_x, min_y = math.huge, math.huge
-    local max_x, max_y = -1, -1
-    for py = 0, img_a.height - 1 do
-        for px = 0, img_a.width - 1 do
-            local va = img_a:getPixel(px, py)
-            local vb = img_b:getPixel(px, py)
-            local aa = app.pixelColor.rgbaA(va)
-            local ab = app.pixelColor.rgbaA(vb)
-            local diff
-            if aa == 0 and ab == 0 then
-                diff = false
-            else
-                diff = va ~= vb
-            end
-            if diff then
-                changed = changed + 1
-                if px < min_x then min_x = px end
-                if py < min_y then min_y = py end
-                if px > max_x then max_x = px end
-                if py > max_y then max_y = py end
-            end
-        end
-    end
-
-    if changed == 0 then
-        -- math.huge has no integer representation for %d
-        min_x, min_y, max_x, max_y = 0, 0, -1, -1
-    end
-    print(string.format("DIFF:%d,%d,%d,%d,%d,%d,%d",
-        changed, img_a.width * img_a.height, min_x, min_y, max_x, max_y,
-        (changed > 0) and 1 or 0))
-    """
-
-    output = await run_script(script, filename)
-
-    for line in output.splitlines():
-        if line.startswith("DIFF:"):
-            parts = [int(p) for p in line[len("DIFF:"):].split(",")]
-            changed, total, min_x, min_y, max_x, max_y, any_change = parts
-            result = {
-                "frame_a": frame_a,
-                "frame_b": frame_b,
-                "changed_pixels": changed,
-                "total_pixels": total,
-                "percent_changed": round(changed / total * 100, 2) if total else 0,
-            }
-            if any_change:
-                result["changed_bounds"] = {
-                    "x": min_x,
-                    "y": min_y,
-                    "width": max_x - min_x + 1,
-                    "height": max_y - min_y + 1,
-                }
-            return json.dumps(result)
-    raise AsepriteError("No diff data returned")
+    diff = await call("analysis.compare", filename, frame_a=frame_a, frame_b=frame_b)
+    total = diff["total"]
+    result = {
+        "frame_a": frame_a,
+        "frame_b": frame_b,
+        "changed_pixels": diff["changed"],
+        "total_pixels": total,
+        "percent_changed": round(diff["changed"] / total * 100, 2) if total else 0,
+    }
+    if "bounds" in diff:
+        result["changed_bounds"] = {k: diff["bounds"][k] for k in ("x", "y", "width", "height")}
+    return json.dumps(result)
 
 
 @mcp.tool()
 async def get_color_stats(filename: str, frame_index: int = 1, top: int = 16) -> str:
     """Report the colors used in a frame and how often each appears.
 
-    Flattens the sprite (non-destructively) and histograms the frame.
+    Composites the frame's visible layers (non-destructively; hidden
+    layers are left out) and histograms it.
     Use to check palette discipline: too many near-duplicate colors is
     a common pixel-art mistake.
 
@@ -240,61 +108,11 @@ async def get_color_stats(filename: str, frame_index: int = 1, top: int = 16) ->
     if top < 1:
         raise InputError("top must be >= 1")
 
-    script = f"""
-    {_FLATTEN_FRAME}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then print("ERROR:Frame index out of range") return end
-
-    local clone = Sprite(spr)
-    clone:flatten()
-    local img = flatten_frame(clone, idx, nil)
-
-    local counts = {{}}
-    local opaque = 0
-    for py = 0, img.height - 1 do
-        for px = 0, img.width - 1 do
-            local v = img:getPixel(px, py)
-            if app.pixelColor.rgbaA(v) > 0 then
-                opaque = opaque + 1
-                local hex = string.format("#%02X%02X%02X",
-                    app.pixelColor.rgbaR(v),
-                    app.pixelColor.rgbaG(v),
-                    app.pixelColor.rgbaB(v))
-                counts[hex] = (counts[hex] or 0) + 1
-            end
-        end
-    end
-
-    local unique = 0
-    for hex, count in pairs(counts) do
-        unique = unique + 1
-        print("COLOR:" .. hex .. "," .. count)
-    end
-    print("OPAQUE:" .. opaque)
-    print("UNIQUE:" .. unique)
-    """
-
-    output = await run_script(script, filename)
-
-    colors = []
-    opaque = 0
-    unique = 0
-    for line in output.splitlines():
-        if line.startswith("COLOR:"):
-            hex_color, count = line[len("COLOR:"):].split(",")
-            colors.append({"color": hex_color, "count": int(count)})
-        elif line.startswith("OPAQUE:"):
-            opaque = int(line[len("OPAQUE:"):])
-        elif line.startswith("UNIQUE:"):
-            unique = int(line[len("UNIQUE:"):])
-
-    colors.sort(key=lambda c: c["count"], reverse=True)
+    stats = await call("analysis.color_stats", filename, frame=frame_index)
+    colors = sorted(stats["colors"] or [], key=lambda c: (-c["count"], c["color"]))
     return json.dumps({
         "frame": frame_index,
-        "unique_colors": unique,
-        "opaque_pixels": opaque,
-        "top_colors": colors[:top],
+        "unique_colors": len(colors),
+        "opaque_pixels": stats["opaque"],
+        "top_colors": [{"color": c["color"], "count": c["count"]} for c in colors[:top]],
     })
