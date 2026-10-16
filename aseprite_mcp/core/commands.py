@@ -31,17 +31,6 @@ worker = AsepriteWorker(ASEPRITE_PATH, TIMEOUT_SECONDS)
 atexit.register(worker.close)
 
 
-def lua_escape(s: str) -> str:
-    """Escape a string for safe embedding inside a Lua double-quoted string literal."""
-    return (
-        s.replace("\\", "\\\\")
-         .replace('"', '\\"')
-         .replace("\n", "\\n")
-         .replace("\r", "\\r")
-         .replace("\0", "\\0")
-    )
-
-
 def _failure_text(done: subprocess.CompletedProcess) -> str:
     # Aseprite reports some failures on stdout rather than stderr, so fall back
     # to stdout before giving up.
@@ -66,23 +55,17 @@ async def call(op: str, filename: str | None = None, /, **args):
 
     `op` and `filename` are positional-only, so any keyword, including one
     named `filename`, is an op argument. `args` are sent to Lua as JSON; None
-    values are left out, so the op sees them as nil. Raises AsepriteError, carrying the op's failure code, when the
-    op fails.
+    values are left out, so the op sees them as nil. Raises AsepriteError,
+    carrying the op's failure code, when the op fails.
     """
     return await asyncio.to_thread(worker.run_op, op, args, filename)
 
 
-async def run_script(script: str, filename: str | None = None, check_errors: bool = True) -> str:
-    """Run a Lua chunk in the worker, with `filename` open as app.activeSprite.
+async def run_script(script: str, filename: str | None = None) -> str:
+    """Run arbitrary Lua in the worker, with `filename` open as app.activeSprite.
 
-    Returns what the chunk printed. The sprite is closed afterwards, so a chunk
-    that changes it must save it. Curated scripts signal failure by printing a
-    line starting with "ERROR:"; with check_errors the first one is raised as
-    AsepriteError. Pass check_errors=False for user scripts.
+    For run_lua_script; tools call named ops through call(). Returns what the
+    chunk printed. A Lua error raises AsepriteError. The sprite is closed
+    afterwards, so a chunk that changes it must save it.
     """
-    output = await asyncio.to_thread(worker.run_script, script, filename)
-    if check_errors:
-        for line in output.splitlines():
-            if line.startswith("ERROR:"):
-                raise AsepriteError(line[len("ERROR:"):])
-    return output
+    return await asyncio.to_thread(worker.run_script, script, filename)

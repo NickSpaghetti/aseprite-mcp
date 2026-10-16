@@ -40,5 +40,5 @@ async def run_lua_script(script: str, filename: str = "") -> str:
     if filename:
         require_file(filename)
 
-    output = await run_script(script, filename or None, check_errors=False)
+    output = await run_script(script, filename or None)
     return output if output.strip() else "Script executed (no output printed)"

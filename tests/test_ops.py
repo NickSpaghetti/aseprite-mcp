@@ -9,8 +9,6 @@ from aseprite_mcp.core import commands
 from aseprite_mcp.core.errors import AsepriteError
 from aseprite_mcp.tools import canvas, layers
 
-# Modules whose tools only call ops. They must not build Lua in Python again.
-MIGRATED = ["analysis", "animation", "canvas", "drawing", "export", "fx", "layers", "native_fx", "palette", "pixel_read", "quality", "scene", "selection", "slices", "text", "tilemap", "transform"]
 
 TOOLS_DIR = os.path.join(os.path.dirname(__file__), "..", "aseprite_mcp", "tools")
 
@@ -30,10 +28,14 @@ def _load_test_op(source):
         commands.worker._send({"load": [{"name": "test_op.lua", "code": source}]})
 
 
-@pytest.mark.parametrize("module", MIGRATED)
-def test_migrated_module_builds_no_lua(module):
+# Every tool calls named ops; only run_lua_script (script.py) sends Lua source.
+TOOL_MODULES = sorted(f[:-3] for f in os.listdir(TOOLS_DIR) if f.endswith(".py") and f not in ("__init__.py", "script.py"))
+
+
+@pytest.mark.parametrize("module", TOOL_MODULES)
+def test_tools_build_no_lua(module):
     source = open(os.path.join(TOOLS_DIR, f"{module}.py")).read()
-    for needle in ("run_script", "lua_escape", "FIND_LAYER", 'print("ERROR'):
+    for needle in ("run_script", "lua_escape", "FIND_LAYER", 'print("ERROR', "app.activeSprite"):
         assert needle not in source, f"{module}.py still contains {needle}"
 
 

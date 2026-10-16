@@ -296,9 +296,17 @@ The server keeps one headless Aseprite running and sends it every tool call as a
 - **One request at a time.** Aseprite is single-threaded and most tools rewrite a file. Running requests in order through one process means two calls on the same file can't lose each other's changes.
 - **Every request starts from disk.** The file is opened at the start of a request and every sprite is closed at the end. Edits made in the Aseprite GUI or by git between calls are picked up, and nothing piles up in memory.
 - **Nothing carries over.** Globals and open sprites from one call are gone in the next. There is no "active layer" between calls, so pass the layer and frame to the tool that acts on them.
+- **Tools call named Lua ops.** Each tool checks its arguments in Python, then calls a fixed Lua function in `aseprite_mcp/lua/ops/` with the arguments as JSON. No tool builds Lua source, so a layer name full of quotes or code is just a name. `run_lua_script` is the one tool that sends Lua, on purpose.
+- **A failed edit changes nothing.** An op that edits a file runs in one transaction and is saved only if it finishes. If it fails partway, the file on disk is untouched.
 - **Failures are errors.** A tool that fails returns an MCP error result (`isError`), not a success with error text in it.
 - **Timeouts.** A request that runs longer than `ASEPRITE_TIMEOUT` seconds (default 120) gets the process killed. The next call starts a new one, and a crash is handled the same way.
-- Exports that need Aseprite's command line (`--save-as`, `--sheet`) still start a separate Aseprite. They run in turn with the other requests.
+- Exports that need Aseprite's command line (`--save-as`, `--sheet`) still start a separate Aseprite. They run in turn with the other requests. An export only counts as done if it wrote or changed a file during this call.
+
+### Adding a tool
+
+1. Add the op to the matching `aseprite_mcp/lua/ops/<module>.lua`, registered with `lib.edit` (changes the file; saved only on success), `lib.read` (never saved) or `lib.free` (opens its own files). Shared helpers such as `lib.layer`, `lib.frame` and `lib.paint_cel` live in `aseprite_mcp/lua/lib.lua`. Fail with `lib.fail(code, message)`.
+2. Add the tool in `aseprite_mcp/tools/<module>.py`: validate the arguments (`core/boundary.py` has the shared checks), then `await call("<module>.<op>", filename, **args)`.
+3. Add tests under `tests/`. They run against a real Aseprite, so read the result back from the saved file rather than trusting the tool's reply.
 
 ## Docker Usage
 
