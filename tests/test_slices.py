@@ -1,7 +1,9 @@
 """Slice tools (slices.py)."""
 import json
 
-from conftest import ok, run
+from conftest import fails, ok, run
+
+from aseprite_mcp.core.errors import AsepriteError
 
 from aseprite_mcp.tools import slices
 
@@ -11,8 +13,7 @@ def test_create_slice(sprite):
 
 
 def test_create_slice_rejects_duplicate(sprite):
-    result = run(slices.create_slice(sprite, "button", 0, 0, 8, 8))
-    assert "already exists" in result
+    fails(slices.create_slice(sprite, "button", 0, 0, 8, 8), AsepriteError, "already exists")
 
 
 def test_set_slice_center(sprite):

@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tempfile
 import signal
+from ..core.errors import InputError
 from .. import mcp
 
 def _pid_path(port: int) -> str:
@@ -32,7 +33,7 @@ async def start_preview_server(directory: str, port: int = 8000) -> str:
         port: Port to bind (default 8000)
     """
     if not os.path.isdir(directory):
-        return f"Directory {directory} not found"
+        raise InputError(f"Directory {directory} not found")
 
     pid_file = _pid_path(port)
     if os.path.exists(pid_file):

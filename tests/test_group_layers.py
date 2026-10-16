@@ -9,7 +9,9 @@ top-level (Aseprite permits the same name in different groups).
 """
 import pytest
 
-from conftest import BASE, ok, run
+from conftest import BASE, fails, ok, run
+
+from aseprite_mcp.core.errors import AsepriteError
 
 from aseprite_mcp.tools import (
     animation,
@@ -20,7 +22,7 @@ from aseprite_mcp.tools import (
     tilemap,
     transform,
 )
-from aseprite_mcp.core.commands import AsepriteCommand
+from aseprite_mcp.core.commands import run_script
 
 
 @pytest.fixture(scope="module")
@@ -38,8 +40,7 @@ def nested(base_dir):
     local d2 = spr:newLayer(); d2.name = "dupe"; d2.parent = grp
     spr:saveAs(spr.filename)
     """
-    success, out = AsepriteCommand.execute_lua_script(setup, path)
-    assert success, out
+    run(run_script(setup, path))
     return path
 
 
@@ -64,8 +65,7 @@ def test_flip_reaches_nested(nested):  # transform.py converted loop
 
 
 def test_pixel_read_reaches_nested(nested):  # pixel_read.py converted loop
-    result = run(pixel_read.get_pixel_color(nested, 0, 0, "inside"))
-    assert not str(result).startswith(("Failed", "ERROR")), result
+    ok(run(pixel_read.get_pixel_color(nested, 0, 0, "inside")))
 
 
 def test_ambiguous_bare_name_prefers_shallow(nested):
@@ -76,15 +76,13 @@ def test_ambiguous_bare_name_prefers_shallow(nested):
 
 
 def test_bogus_name_still_fails(nested):
-    result = run(drawing.draw_rectangle_at(nested, "NOPE", 1, 0, 0, 2, 2, "#ffffff", True))
-    assert str(result).startswith(("Failed", "ERROR")), result
+    fails(drawing.draw_rectangle_at(nested, "NOPE", 1, 0, 0, 2, 2, "#ffffff", True), AsepriteError)
 
 
 def test_duplicate_name_across_group_allowed(nested):
     # 'inside' exists only inside GRP, so creating a top-level layer with that
     # name must be allowed — the duplicate guard is top-level only.
-    result = run(tilemap.create_tilemap_layer(nested, "inside", 8, 8))
-    assert not str(result).startswith(("Failed", "ERROR")), result
+    ok(run(tilemap.create_tilemap_layer(nested, "inside", 8, 8)))
 
 
 @pytest.fixture(scope="module")
@@ -106,8 +104,7 @@ def slashed(base_dir):
     spr:newCel(z, spr.frames[1], Image(16, 16, spr.colorMode), Point(0, 0))
     spr:saveAs(spr.filename)
     """
-    success, out = AsepriteCommand.execute_lua_script(setup, path)
-    assert success, out
+    run(run_script(setup, path))
     return path
 
 

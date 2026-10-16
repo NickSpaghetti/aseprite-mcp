@@ -1,6 +1,7 @@
-import os
 from typing import List, Dict, Any
-from ..core.commands import AsepriteCommand, lua_escape
+from ..core.commands import lua_escape, run_script
+from ..core.boundary import require_file
+from ..core.errors import InputError
 from ..core.lua import FIND_LAYER, NORMALIZE_CEL, PSET
 from ..core.colors import parse_hex_color
 from .. import mcp
@@ -21,8 +22,7 @@ async def draw_pixels(filename: str, pixels: List[Dict[str, Any]]) -> str:
             {"x": int, "y": int, "color": str}
             where color is a hex code like "#FF0000"
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     script = """
     local spr = app.activeSprite
@@ -53,7 +53,7 @@ async def draw_pixels(filename: str, pixels: List[Dict[str, Any]]) -> str:
         y = pixel.get("y", 0)
         rgb = _parse_hex_color(pixel.get("color", "#000000"))
         if rgb is None:
-            return f"Invalid color value: {pixel.get('color')}"
+            raise InputError(f"Invalid color value: {pixel.get('color')}")
         r, g, b, a = rgb
 
         script += f"""
@@ -67,12 +67,9 @@ async def draw_pixels(filename: str, pixels: List[Dict[str, Any]]) -> str:
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
+    await run_script(script, filename)
 
-    if success:
-        return f"Pixels drawn successfully in {filename}"
-    else:
-        return f"Failed to draw pixels: {output}"
+    return f"Pixels drawn successfully in {filename}"
 
 @mcp.tool()
 async def draw_line(filename: str, x1: int, y1: int, x2: int, y2: int, color: str = "#000000", thickness: int = 1) -> str:
@@ -87,12 +84,11 @@ async def draw_line(filename: str, x1: int, y1: int, x2: int, y2: int, color: st
         color: Hex color code (default: "#000000")
         thickness: Line thickness in pixels (default: 1)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b, a = rgb
 
     script = f"""
@@ -151,12 +147,9 @@ async def draw_line(filename: str, x1: int, y1: int, x2: int, y2: int, color: st
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
+    await run_script(script, filename)
 
-    if success:
-        return f"Line drawn successfully in {filename}"
-    else:
-        return f"Failed to draw line: {output}"
+    return f"Line drawn successfully in {filename}"
 
 @mcp.tool()
 async def draw_rectangle(filename: str, x: int, y: int, width: int, height: int, color: str = "#000000", fill: bool = False) -> str:
@@ -171,14 +164,13 @@ async def draw_rectangle(filename: str, x: int, y: int, width: int, height: int,
         color: Hex color code (default: "#000000")
         fill: Whether to fill the rectangle (default: False)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b, a = rgb
 
     # app.useTool treats both points as inclusive corners, so the second
@@ -214,12 +206,9 @@ async def draw_rectangle(filename: str, x: int, y: int, width: int, height: int,
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
+    await run_script(script, filename)
 
-    if success:
-        return f"Rectangle drawn successfully in {filename}"
-    else:
-        return f"Failed to draw rectangle: {output}"
+    return f"Rectangle drawn successfully in {filename}"
 
 @mcp.tool()
 async def fill_area(filename: str, x: int, y: int, color: str = "#000000") -> str:
@@ -231,12 +220,11 @@ async def fill_area(filename: str, x: int, y: int, color: str = "#000000") -> st
         y: Y coordinate to fill from
         color: Hex color code (default: "#000000")
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b, a = rgb
 
     script = f"""
@@ -266,12 +254,9 @@ async def fill_area(filename: str, x: int, y: int, color: str = "#000000") -> st
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
+    await run_script(script, filename)
 
-    if success:
-        return f"Area filled successfully in {filename}"
-    else:
-        return f"Failed to fill area: {output}"
+    return f"Area filled successfully in {filename}"
 
 @mcp.tool()
 async def draw_circle(filename: str, center_x: int, center_y: int, radius: int, color: str = "#000000", fill: bool = False) -> str:
@@ -285,12 +270,11 @@ async def draw_circle(filename: str, center_x: int, center_y: int, radius: int, 
         color: Hex color code (default: "#000000")
         fill: Whether to fill the circle (default: False)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b, a = rgb
 
     script = f"""
@@ -324,12 +308,9 @@ async def draw_circle(filename: str, center_x: int, center_y: int, radius: int, 
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
+    await run_script(script, filename)
 
-    if success:
-        return f"Circle drawn successfully in {filename}"
-    else:
-        return f"Failed to draw circle: {output}"
+    return f"Circle drawn successfully in {filename}"
 
 @mcp.tool()
 async def draw_pixels_at(
@@ -348,8 +329,7 @@ async def draw_pixels_at(
         pixels: List of pixel data with x/y/color
         create_if_missing: Create cel if it does not exist
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     safe_layer_name = lua_escape(layer_name)
     create_flag = "true" if create_if_missing else "false"
@@ -382,7 +362,7 @@ async def draw_pixels_at(
         y = pixel.get("y", 0)
         rgb = _parse_hex_color(pixel.get("color", "#000000"))
         if rgb is None:
-            return f"Invalid color value: {pixel.get('color')}"
+            raise InputError(f"Invalid color value: {pixel.get('color')}")
         r, g, b, a = rgb
         script += f"""
         img:putPixel({x} - cox, {y} - coy, Color({r}, {g}, {b}, {a}))
@@ -395,10 +375,8 @@ async def draw_pixels_at(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Pixels drawn on '{layer_name}' frame {frame_index} in {filename}"
-    return f"Failed to draw pixels: {output}"
+    await run_script(script, filename)
+    return f"Pixels drawn on '{layer_name}' frame {frame_index} in {filename}"
 
 @mcp.tool()
 async def draw_line_at(
@@ -427,12 +405,11 @@ async def draw_line_at(
         thickness (int, optional): The thickness of the line. Defaults to 1.
         create_if_missing (bool, optional): Whether to create the layer if it doesn't exist. Defaults to True.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b, a = rgb
     safe_layer_name = lua_escape(layer_name)
     create_flag = "true" if create_if_missing else "false"
@@ -496,10 +473,8 @@ async def draw_line_at(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Line drawn on '{layer_name}' frame {frame_index} in {filename}"
-    return f"Failed to draw line: {output}"
+    await run_script(script, filename)
+    return f"Line drawn on '{layer_name}' frame {frame_index} in {filename}"
 
 @mcp.tool()
 async def draw_rectangle_at(
@@ -528,14 +503,13 @@ async def draw_rectangle_at(
         fill (bool, optional): Whether to fill the rectangle. Defaults to False.
         create_if_missing (bool, optional): Whether to create the layer if it doesn't exist. Defaults to True.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b, a = rgb
     safe_layer_name = lua_escape(layer_name)
     create_flag = "true" if create_if_missing else "false"
@@ -575,10 +549,8 @@ async def draw_rectangle_at(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Rectangle drawn on '{layer_name}' frame {frame_index} in {filename}"
-    return f"Failed to draw rectangle: {output}"
+    await run_script(script, filename)
+    return f"Rectangle drawn on '{layer_name}' frame {frame_index} in {filename}"
 
 @mcp.tool()
 async def draw_circle_at(
@@ -605,12 +577,11 @@ async def draw_circle_at(
         fill (bool, optional): Whether to fill the circle. Defaults to False.
         create_if_missing (bool, optional): Whether to create the layer if it doesn't exist. Defaults to True.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b, a = rgb
     safe_layer_name = lua_escape(layer_name)
     create_flag = "true" if create_if_missing else "false"
@@ -651,10 +622,8 @@ async def draw_circle_at(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Circle drawn on '{layer_name}' frame {frame_index} in {filename}"
-    return f"Failed to draw circle: {output}"
+    await run_script(script, filename)
+    return f"Circle drawn on '{layer_name}' frame {frame_index} in {filename}"
 
 @mcp.tool()
 async def fill_area_at(
@@ -677,12 +646,11 @@ async def fill_area_at(
         color (str, optional): The color to fill the area with. Defaults to "#000000".
         create_if_missing (bool, optional): Whether to create the layer if it doesn't exist. Defaults to True.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b, a = rgb
     safe_layer_name = lua_escape(layer_name)
     create_flag = "true" if create_if_missing else "false"
@@ -719,10 +687,8 @@ async def fill_area_at(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Area filled on '{layer_name}' frame {frame_index} in {filename}"
-    return f"Failed to fill area: {output}"
+    await run_script(script, filename)
+    return f"Area filled on '{layer_name}' frame {frame_index} in {filename}"
 
 @mcp.tool()
 async def draw_polygon(
@@ -745,14 +711,13 @@ async def draw_polygon(
         fill (bool, optional): Whether to fill the polygon. Defaults to False.
         create_if_missing (bool, optional): Whether to create the layer if it doesn't exist. Defaults to True.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if len(points) < 3:
-        return "Polygon requires at least 3 points"
+        raise InputError("Polygon requires at least 3 points")
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b, a = rgb
     safe_layer_name = lua_escape(layer_name)
     create_flag = "true" if create_if_missing else "false"
@@ -843,10 +808,8 @@ async def draw_polygon(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Polygon drawn on '{layer_name}' frame {frame_index} in {filename}"
-    return f"Failed to draw polygon: {output}"
+    await run_script(script, filename)
+    return f"Polygon drawn on '{layer_name}' frame {frame_index} in {filename}"
 
 @mcp.tool()
 async def draw_path(
@@ -869,14 +832,13 @@ async def draw_path(
         thickness (int, optional): The thickness of the path. Defaults to 1.
         create_if_missing (bool, optional): Whether to create the layer if it doesn't exist. Defaults to True.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if len(points) < 2:
-        return "Path requires at least 2 points"
+        raise InputError("Path requires at least 2 points")
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b, a = rgb
     safe_layer_name = lua_escape(layer_name)
     create_flag = "true" if create_if_missing else "false"
@@ -940,10 +902,8 @@ async def draw_path(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Path drawn on '{layer_name}' frame {frame_index} in {filename}"
-    return f"Failed to draw path: {output}"
+    await run_script(script, filename)
+    return f"Path drawn on '{layer_name}' frame {frame_index} in {filename}"
 
 @mcp.tool()
 async def apply_gradient_rect(
@@ -974,17 +934,16 @@ async def apply_gradient_rect(
         horizontal (bool, optional): Whether to draw the gradient horizontally. Defaults to True.
         create_if_missing (bool, optional): Whether to create the layer if it doesn't exist. Defaults to True.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
 
     start_rgb = _parse_hex_color(color_start)
     if start_rgb is None:
-        return f"Invalid color_start value: {color_start}"
+        raise InputError(f"Invalid color_start value: {color_start}")
     end_rgb = _parse_hex_color(color_end)
     if end_rgb is None:
-        return f"Invalid color_end value: {color_end}"
+        raise InputError(f"Invalid color_end value: {color_end}")
 
     sr, sg, sb, sa = start_rgb
     er, eg, eb, ea = end_rgb
@@ -1034,10 +993,8 @@ async def apply_gradient_rect(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Gradient applied on '{layer_name}' frame {frame_index} in {filename}"
-    return f"Failed to apply gradient: {output}"
+    await run_script(script, filename)
+    return f"Gradient applied on '{layer_name}' frame {frame_index} in {filename}"
 
 
 @mcp.tool()
@@ -1067,14 +1024,13 @@ async def draw_ellipse_at(
         fill: Fill the ellipse instead of outlining it
         create_if_missing: Create the cel if it does not exist
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if radius_x <= 0 or radius_y <= 0:
-        return "radius_x and radius_y must be > 0"
+        raise InputError("radius_x and radius_y must be > 0")
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b, a = rgb
     safe_layer_name = lua_escape(layer_name)
     create_flag = "true" if create_if_missing else "false"
@@ -1115,7 +1071,5 @@ async def draw_ellipse_at(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Ellipse drawn on '{layer_name}' frame {frame_index} in {filename}"
-    return f"Failed to draw ellipse: {output}"
+    await run_script(script, filename)
+    return f"Ellipse drawn on '{layer_name}' frame {frame_index} in {filename}"

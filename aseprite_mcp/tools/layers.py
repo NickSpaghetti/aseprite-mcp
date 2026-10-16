@@ -1,5 +1,6 @@
-import os
-from ..core.commands import AsepriteCommand, lua_escape
+from ..core.commands import lua_escape, run_script
+from ..core.boundary import require_file
+from ..core.errors import InputError
 from ..core.lua import FIND_LAYER
 from .. import mcp
 
@@ -34,8 +35,7 @@ async def delete_layer(filename: str, layer_name: str) -> str:
         filename: Aseprite file to modify
         layer_name: Name of the layer to delete
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -55,10 +55,8 @@ async def delete_layer(filename: str, layer_name: str) -> str:
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Layer '{layer_name}' deleted from {filename}"
-    return f"Failed to delete layer: {output}"
+    await run_script(script, filename)
+    return f"Layer '{layer_name}' deleted from {filename}"
 
 
 @mcp.tool()
@@ -70,10 +68,9 @@ async def rename_layer(filename: str, layer_name: str, new_name: str) -> str:
         layer_name: Current layer name
         new_name: New layer name
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if not new_name:
-        return "New name cannot be empty"
+        raise InputError("New name cannot be empty")
 
     safe_layer = lua_escape(layer_name)
     safe_new = lua_escape(new_name)
@@ -93,10 +90,8 @@ async def rename_layer(filename: str, layer_name: str, new_name: str) -> str:
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Layer '{layer_name}' renamed to '{new_name}' in {filename}"
-    return f"Failed to rename layer: {output}"
+    await run_script(script, filename)
+    return f"Layer '{layer_name}' renamed to '{new_name}' in {filename}"
 
 
 @mcp.tool()
@@ -116,8 +111,7 @@ async def duplicate_layer(
         group: Optional group to place the copy inside, by name or
             "group/subgroup" path (default: directly above the source)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     final_name = new_name or f"{layer_name} copy"
     safe_layer = lua_escape(layer_name)
@@ -161,11 +155,9 @@ async def duplicate_layer(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        location = f" inside group '{group}'" if group else ""
-        return f"Layer '{layer_name}' duplicated as '{final_name}'{location} in {filename}"
-    return f"Failed to duplicate layer: {output}"
+    await run_script(script, filename)
+    location = f" inside group '{group}'" if group else ""
+    return f"Layer '{layer_name}' duplicated as '{final_name}'{location} in {filename}"
 
 
 @mcp.tool()
@@ -177,10 +169,9 @@ async def reorder_layer(filename: str, layer_name: str, position: int) -> str:
         layer_name: Layer to move
         position: Target stack position, 1-based where 1 is the bottom layer
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if position < 1:
-        return "Position must be >= 1"
+        raise InputError("Position must be >= 1")
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -200,10 +191,8 @@ async def reorder_layer(filename: str, layer_name: str, position: int) -> str:
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Layer '{layer_name}' moved to position {position} in {filename}"
-    return f"Failed to reorder layer: {output}"
+    await run_script(script, filename)
+    return f"Layer '{layer_name}' moved to position {position} in {filename}"
 
 
 @mcp.tool()
@@ -218,12 +207,11 @@ async def set_layer_blend_mode(filename: str, layer_name: str, mode: str) -> str
             difference, exclusion, subtract, divide, hue, saturation,
             color, luminosity
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     blend = _BLEND_MODES.get(mode.lower())
     if blend is None:
-        return f"Unknown blend mode '{mode}'. Valid modes: {', '.join(sorted(_BLEND_MODES))}"
+        raise InputError(f"Unknown blend mode '{mode}'. Valid modes: {', '.join(sorted(_BLEND_MODES))}")
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -242,10 +230,8 @@ async def set_layer_blend_mode(filename: str, layer_name: str, mode: str) -> str
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Layer '{layer_name}' blend mode set to {mode} in {filename}"
-    return f"Failed to set blend mode: {output}"
+    await run_script(script, filename)
+    return f"Layer '{layer_name}' blend mode set to {mode} in {filename}"
 
 
 @mcp.tool()
@@ -256,8 +242,7 @@ async def merge_layer_down(filename: str, layer_name: str) -> str:
         filename: Aseprite file to modify
         layer_name: Layer to merge down (must not be the bottom layer)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -276,10 +261,8 @@ async def merge_layer_down(filename: str, layer_name: str) -> str:
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Layer '{layer_name}' merged down in {filename}"
-    return f"Failed to merge layer down: {output}"
+    await run_script(script, filename)
+    return f"Layer '{layer_name}' merged down in {filename}"
 
 
 @mcp.tool()
@@ -289,8 +272,7 @@ async def flatten_sprite(filename: str) -> str:
     Args:
         filename: Aseprite file to modify
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     script = """
     local spr = app.activeSprite
@@ -304,7 +286,5 @@ async def flatten_sprite(filename: str) -> str:
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Sprite flattened in {filename}"
-    return f"Failed to flatten sprite: {output}"
+    await run_script(script, filename)
+    return f"Sprite flattened in {filename}"

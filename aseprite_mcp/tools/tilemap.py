@@ -1,7 +1,8 @@
 import json
-import os
 from typing import List, Dict, Any
-from ..core.commands import AsepriteCommand, lua_escape
+from ..core.commands import lua_escape, run_script
+from ..core.boundary import require_file
+from ..core.errors import AsepriteError, InputError
 from ..core.lua import FIND_LAYER
 from .. import mcp
 
@@ -40,10 +41,9 @@ async def create_tilemap_layer(
         tile_width: Tile width in pixels
         tile_height: Tile height in pixels
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if tile_width <= 0 or tile_height <= 0:
-        return "Tile dimensions must be > 0"
+        raise InputError("Tile dimensions must be > 0")
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -70,13 +70,11 @@ async def create_tilemap_layer(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return (
-            f"Tilemap layer '{layer_name}' created with {tile_width}x{tile_height} "
-            f"tiles in {filename}"
-        )
-    return f"Failed to create tilemap layer: {output}"
+    await run_script(script, filename)
+    return (
+        f"Tilemap layer '{layer_name}' created with {tile_width}x{tile_height} "
+        f"tiles in {filename}"
+    )
 
 
 @mcp.tool()
@@ -98,18 +96,17 @@ async def draw_on_tile(
             for the empty tile and cannot be drawn on)
         pixels: List of {"x": int, "y": int, "color": "#RRGGBB"}
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if tile_index < 1:
-        return "tile_index must be >= 1 (tile 0 is the reserved empty tile)"
+        raise InputError("tile_index must be >= 1 (tile 0 is the reserved empty tile)")
     if not pixels:
-        return "Pixels list cannot be empty"
+        raise InputError("Pixels list cannot be empty")
 
     puts = []
     for pixel in pixels:
         rgb = _parse_hex_color(pixel.get("color", ""))
         if rgb is None:
-            return f"Invalid color value: {pixel.get('color')}"
+            raise InputError(f"Invalid color value: {pixel.get('color')}")
         r, g, b = rgb
         x = int(pixel.get("x", 0))
         y = int(pixel.get("y", 0))
@@ -153,13 +150,11 @@ async def draw_on_tile(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return (
-            f"Drew {len(pixels)} pixels on tile {tile_index} of '{layer_name}' "
-            f"in {filename}"
-        )
-    return f"Failed to draw on tile: {output}"
+    await run_script(script, filename)
+    return (
+        f"Drew {len(pixels)} pixels on tile {tile_index} of '{layer_name}' "
+        f"in {filename}"
+    )
 
 
 @mcp.tool()
@@ -178,10 +173,9 @@ async def set_tiles(
         tiles: List of {"col": int, "row": int, "tile_index": int}
             (col/row are grid coordinates; tile_index 0 clears the cell)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if not tiles:
-        return "Tiles list cannot be empty"
+        raise InputError("Tiles list cannot be empty")
 
     entries = []
     for t in tiles:
@@ -255,13 +249,11 @@ async def set_tiles(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return (
-            f"Placed {len(tiles)} tiles on '{layer_name}' frame {frame_index} "
-            f"in {filename}"
-        )
-    return f"Failed to set tiles: {output}"
+    await run_script(script, filename)
+    return (
+        f"Placed {len(tiles)} tiles on '{layer_name}' frame {frame_index} "
+        f"in {filename}"
+    )
 
 
 @mcp.tool()
@@ -284,8 +276,7 @@ async def get_tile_at(
     Returns:
         JSON with {col, row, tile_index} (0 = empty).
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -313,16 +304,14 @@ async def get_tile_at(
     print("TILE:" .. tile)
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if not success:
-        return f"Failed to read tile: {output}"
+    output = await run_script(script, filename)
 
     for line in output.splitlines():
         if line.startswith("TILE:"):
             return json.dumps({
                 "col": col, "row": row, "tile_index": int(line[len("TILE:"):]),
             })
-    return "No tile data returned"
+    raise AsepriteError("No tile data returned")
 
 
 @mcp.tool()
@@ -337,8 +326,7 @@ async def get_tilemap_info(filename: str, layer_name: str) -> str:
         JSON with tile_width, tile_height, tile_count (real tiles,
         excluding the empty tile 0), map_cols, map_rows.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -358,9 +346,7 @@ async def get_tilemap_info(filename: str, layer_name: str) -> str:
         math.ceil(spr.height / grid.height)))
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if not success:
-        return f"Failed to get tilemap info: {output}"
+    output = await run_script(script, filename)
 
     for line in output.splitlines():
         if line.startswith("INFO:"):
@@ -369,4 +355,4 @@ async def get_tilemap_info(filename: str, layer_name: str) -> str:
                 "tile_width": tw, "tile_height": th, "tile_count": count,
                 "map_cols": cols, "map_rows": rows,
             })
-    return "No tilemap data returned"
+    raise AsepriteError("No tilemap data returned")

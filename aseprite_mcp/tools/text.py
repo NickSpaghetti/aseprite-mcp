@@ -10,7 +10,9 @@ from typing import Optional
 
 from PIL import Image
 
-from ..core.commands import AsepriteCommand, lua_escape
+from ..core.commands import lua_escape, run_script
+from ..core.boundary import require_file
+from ..core.errors import InputError
 from ..core.colors import parse_hex_color
 from ..core.lua import FIND_LAYER, NORMALIZE_CEL
 from ..core import fonts as fontlib
@@ -57,10 +59,7 @@ async def list_text_fonts() -> str:
     directories. Bitmap fonts are the right choice for pixel art: their
     glyphs are already pixels and `size` scales them by whole numbers.
     """
-    try:
-        found = fontlib.available_fonts()
-    except Exception as exc:                                # pragma: no cover
-        return f"ERROR: {exc}"
+    found = fontlib.available_fonts()
     if not found:
         return "No fonts found. Drop a .ttf into ~/.aseprite-mcp/fonts/."
 
@@ -107,8 +106,8 @@ async def measure_text(
     try:
         f = fontlib.load_font(font)
         _, m = fontlib.shape(text, f, size, letter_spacing, bold, antialias)
-    except Exception as exc:
-        return f"ERROR: {exc}"
+    except fontlib.FontError as exc:
+        raise InputError(str(exc)) from exc
     return (
         f"width={m['width']} height={m['height']} advance_width={m['advance_width']} "
         f"above_baseline={-m['top']} below_baseline={m['bottom'] + 1} "
@@ -172,30 +171,29 @@ async def draw_text(
         antialias: Keep greyscale edges instead of hard pixels (default False)
         create_if_missing: Create the layer/cel if absent (default True)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if anchor not in _ANCHORS:
-        return f"Invalid anchor '{anchor}'. Expected one of: {', '.join(sorted(_ANCHORS))}"
+        raise InputError(f"Invalid anchor '{anchor}'. Expected one of: {', '.join(sorted(_ANCHORS))}")
 
     fill = parse_hex_color(color)
     if fill is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     outline_rgba = None
     if outline_color:
         outline_rgba = parse_hex_color(outline_color)
         if outline_rgba is None:
-            return f"Invalid outline_color value: {outline_color}"
+            raise InputError(f"Invalid outline_color value: {outline_color}")
     shadow_rgba = None
     if shadow_color:
         shadow_rgba = parse_hex_color(shadow_color)
         if shadow_rgba is None:
-            return f"Invalid shadow_color value: {shadow_color}"
+            raise InputError(f"Invalid shadow_color value: {shadow_color}")
 
     try:
         f = fontlib.load_font(font)
         ink, metrics = fontlib.shape(text, f, size, letter_spacing, bold, antialias)
-    except Exception as exc:
-        return f"ERROR: {exc}"
+    except fontlib.FontError as exc:
+        raise InputError(str(exc)) from exc
     if not ink:
         return "OK: nothing to draw (text has no visible glyphs)"
 
@@ -281,14 +279,12 @@ async def draw_text(
     """
 
     try:
-        success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
+        await run_script(script, filename)
     finally:
         try:
             os.unlink(tmp.name)
         except OSError:
             pass
 
-    if not success:
-        return f"Error drawing text: {output}"
     return (f"Drew '{text}' at ({blit_x}, {blit_y}), "
             f"text box {metrics['width']}x{metrics['height']}, stamp {w}x{h}")

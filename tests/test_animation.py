@@ -1,7 +1,9 @@
 """Frame, cel, and tag tools added to animation.py."""
 import json
 
-from conftest import ok, run
+from conftest import fails, ok, run
+
+from aseprite_mcp.core.errors import AsepriteError
 
 from aseprite_mcp.tools import animation
 
@@ -24,8 +26,7 @@ def test_set_and_delete_tag(sprite):
 
 
 def test_delete_tag_missing(sprite):
-    result = run(animation.delete_tag(sprite, "nope"))
-    assert "Tag not found" in result
+    fails(animation.delete_tag(sprite, "nope"), AsepriteError, "Tag not found")
 
 
 def test_delete_frame(sprite):

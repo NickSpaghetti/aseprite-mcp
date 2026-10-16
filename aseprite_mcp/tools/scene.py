@@ -1,6 +1,7 @@
-import os
 from typing import List
-from ..core.commands import AsepriteCommand, lua_escape, reject_traversal
+from ..core.commands import lua_escape, run_script
+from ..core.boundary import require_file, require_safe_path
+from ..core.errors import InputError
 from ..core.lua import FIND_LAYER
 from .. import mcp
 
@@ -21,15 +22,12 @@ async def copy_layers_between_sprites(
         replace: Overwrite existing cels in target layers
         create_missing_frames: Add frames to target if needed
     """
-    if not os.path.exists(source_filename):
-        return f"File {source_filename} not found"
-    if not os.path.exists(target_filename):
-        return f"File {target_filename} not found"
+    require_file(source_filename)
+    require_file(target_filename)
     if not layer_names:
-        return "Layer names list cannot be empty"
-    err = reject_traversal(source_filename) or reject_traversal(target_filename)
-    if err:
-        return err
+        raise InputError("Layer names list cannot be empty")
+    require_safe_path(source_filename)
+    require_safe_path(target_filename)
 
     src_path = lua_escape(source_filename.replace("\\", "/"))
     dst_path = lua_escape(target_filename.replace("\\", "/"))
@@ -105,9 +103,7 @@ async def copy_layers_between_sprites(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script)
-    if not success:
-        return f"Failed to copy layers: {output}"
+    output = await run_script(script)
     missing = next(
         (line[len("MISSING:"):] for line in output.splitlines() if line.startswith("MISSING:")),
         None,

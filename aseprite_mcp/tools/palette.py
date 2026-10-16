@@ -1,8 +1,9 @@
 import colorsys
 import json
-import os
 from typing import List
-from ..core.commands import AsepriteCommand, lua_escape
+from ..core.commands import lua_escape, run_script
+from ..core.boundary import require_file
+from ..core.errors import InputError
 from ..core.lua import FIND_LAYER
 from ..core.colors import parse_hex_color
 from .. import mcp
@@ -51,8 +52,7 @@ def _parse_hex_color(value: str) -> tuple[int, int, int] | None:
 @mcp.tool()
 async def get_palette(filename: str) -> str:
     """Get the active sprite palette as a JSON array of hex colors."""
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     script = """
     local spr = app.activeSprite
@@ -76,24 +76,21 @@ async def get_palette(filename: str) -> str:
     print(table.concat(parts))
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return output
-    return f"Failed to get palette: {output}"
+    output = await run_script(script, filename)
+    return output
 
 @mcp.tool()
 async def set_palette(filename: str, colors: List[str]) -> str:
     """Set the active sprite palette using a list of hex colors."""
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if not colors:
-        return "Colors list cannot be empty"
+        raise InputError("Colors list cannot be empty")
 
     rgb_list = []
     for color in colors:
         rgb = _parse_hex_color(color)
         if rgb is None:
-            return "Colors must use #RRGGBB values"
+            raise InputError("Colors must use #RRGGBB values")
         rgb_list.append(rgb)
 
     palette_entries = "\n".join(
@@ -111,10 +108,8 @@ async def set_palette(filename: str, colors: List[str]) -> str:
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Palette set with {len(colors)} colors in {filename}"
-    return f"Failed to set palette: {output}"
+    await run_script(script, filename)
+    return f"Palette set with {len(colors)} colors in {filename}"
 
 @mcp.tool()
 async def remap_colors_in_cel_range(
@@ -137,17 +132,16 @@ async def remap_colors_in_cel_range(
         create_missing_cels (bool, optional): Whether to create missing cels. Defaults to False.
         source_frame_index (int | None, optional): The source frame index to use for remapping. Defaults to None.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if not mappings:
-        return "Mappings list cannot be empty"
+        raise InputError("Mappings list cannot be empty")
 
     parsed = []
     for m in mappings:
         src = _parse_hex_color(m.get("from") or "")
         dst = _parse_hex_color(m.get("to") or "")
         if src is None or dst is None:
-            return "Mappings must use #RRGGBB colors"
+            raise InputError("Mappings must use #RRGGBB colors")
         sr, sg, sb = src
         dr, dg, db = dst
         parsed.append((sr, sg, sb, dr, dg, db))
@@ -225,12 +219,10 @@ async def remap_colors_in_cel_range(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return (
-            f"Remapped colors on '{layer_name}' frames {start_frame}-{end_frame} in {filename}"
-        )
-    return f"Failed to remap colors: {output}"
+    await run_script(script, filename)
+    return (
+        f"Remapped colors on '{layer_name}' frames {start_frame}-{end_frame} in {filename}"
+    )
 
 
 @mcp.tool()
@@ -257,7 +249,7 @@ async def apply_palette_preset(filename: str, preset: str) -> str:
     """
     colors = PALETTE_PRESETS.get(preset.lower())
     if colors is None:
-        return f"Unknown preset '{preset}'. Available: {', '.join(sorted(PALETTE_PRESETS))}"
+        raise InputError(f"Unknown preset '{preset}'. Available: {', '.join(sorted(PALETTE_PRESETS))}")
     result = await set_palette(filename, colors)
     if result.startswith("Palette set"):
         return f"Palette preset '{preset}' ({len(colors)} colors) applied to {filename}"
@@ -289,11 +281,11 @@ async def generate_color_ramp(
     """
     rgb = _parse_hex_color(base_color)
     if rgb is None:
-        return f"Invalid color value: {base_color}"
+        raise InputError(f"Invalid color value: {base_color}")
     if not (2 <= steps <= 16):
-        return "steps must be between 2 and 16"
+        raise InputError("steps must be between 2 and 16")
     if not (0 <= lightness_range <= 1):
-        return "lightness_range must be between 0 and 1"
+        raise InputError("lightness_range must be between 0 and 1")
 
     r, g, b = (c / 255 for c in rgb)
     h, l, s = colorsys.rgb_to_hls(r, g, b)
@@ -332,8 +324,7 @@ async def quantize_to_palette(
         start_frame: First frame to process (default 1)
         end_frame: Last frame to process (default 0 = last frame)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -415,9 +406,7 @@ async def quantize_to_palette(
     print("COUNT:" .. count)
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if not success:
-        return f"Failed to quantize: {output}"
+    output = await run_script(script, filename)
 
     count = "?"
     for line in output.splitlines():
@@ -434,10 +423,9 @@ async def set_color_mode(filename: str, mode: str) -> str:
         filename: Aseprite file to modify
         mode: "rgb", "grayscale", or "indexed"
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if mode.lower() not in ("rgb", "grayscale", "indexed"):
-        return "mode must be 'rgb', 'grayscale', or 'indexed'"
+        raise InputError("mode must be 'rgb', 'grayscale', or 'indexed'")
 
     script = f"""
     local spr = app.activeSprite
@@ -449,7 +437,5 @@ async def set_color_mode(filename: str, mode: str) -> str:
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Color mode set to {mode} in {filename}"
-    return f"Failed to set color mode: {output}"
+    await run_script(script, filename)
+    return f"Color mode set to {mode} in {filename}"

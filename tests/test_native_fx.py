@@ -1,7 +1,9 @@
 """Native Aseprite command wrappers (native_fx.py)."""
 import json
 
-from conftest import ok, run
+from conftest import fails, ok, run
+
+from aseprite_mcp.core.errors import InputError
 
 from aseprite_mcp.tools import native_fx, pixel_read
 
@@ -19,8 +21,7 @@ def test_list_convolution_matrices():
 
 
 def test_apply_convolution_rejects_unknown_matrix(sprite):
-    res = run(native_fx.apply_convolution(sprite, "not-a-matrix", "body", 1))
-    assert res.startswith("Unknown matrix")
+    fails(native_fx.apply_convolution(sprite, "not-a-matrix", "body", 1), InputError, "^Unknown matrix")
 
 
 def test_outline_native_inside_colours_the_edge(sprite):
@@ -55,7 +56,7 @@ def test_apply_convolution_blur(sprite):
 
 
 def test_adjust_hsl_native_rejects_out_of_range(sprite):
-    assert run(native_fx.adjust_hsl_native(sprite, "body", 1, 999)).startswith("hue must be")
+    fails(native_fx.adjust_hsl_native(sprite, "body", 1, 999), InputError, "^hue must be")
 
 
 def test_extract_palette(sprite):

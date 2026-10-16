@@ -1,5 +1,6 @@
-import os
-from ..core.commands import AsepriteCommand, lua_escape
+from ..core.commands import lua_escape, run_script
+from ..core.boundary import require_file
+from ..core.errors import InputError
 from ..core.lua import FIND_LAYER, NORMALIZE_CEL, PSET, HSL
 from ..core.colors import parse_hex_color
 from .. import mcp
@@ -33,12 +34,11 @@ async def outline_cel(
         include_diagonals: Also outline diagonal neighbors for a thicker,
             rounded outline (default False)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b = rgb
     diag = "true" if include_diagonals else "false"
 
@@ -88,10 +88,8 @@ async def outline_cel(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Outline added to '{layer_name}' frame {frame_index} in {filename}"
-    return f"Failed to outline cel: {output}"
+    await run_script(script, filename)
+    return f"Outline added to '{layer_name}' frame {frame_index} in {filename}"
 
 
 @mcp.tool()
@@ -113,15 +111,14 @@ async def replace_color(
         to_color: Replacement hex color
         tolerance: Per-channel tolerance 0-255 (default 0 = exact match)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     src = _parse_hex_color(from_color)
     dst = _parse_hex_color(to_color)
     if src is None or dst is None:
-        return "Colors must use #RRGGBB values"
+        raise InputError("Colors must use #RRGGBB values")
     if tolerance < 0 or tolerance > 255:
-        return "Tolerance must be between 0 and 255"
+        raise InputError("Tolerance must be between 0 and 255")
     sr, sg, sb = src
     dr, dg, db = dst
 
@@ -164,9 +161,7 @@ async def replace_color(
     print("COUNT:" .. count)
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if not success:
-        return f"Failed to replace color: {output}"
+    output = await run_script(script, filename)
 
     count = "?"
     for line in output.splitlines():
@@ -201,14 +196,13 @@ async def adjust_hsl(
         saturation_shift: Saturation delta, -100 to 100
         lightness_shift: Lightness delta, -100 to 100
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if not (-360 <= hue_shift <= 360):
-        return "hue_shift must be between -360 and 360"
+        raise InputError("hue_shift must be between -360 and 360")
     if not (-100 <= saturation_shift <= 100):
-        return "saturation_shift must be between -100 and 100"
+        raise InputError("saturation_shift must be between -100 and 100")
     if not (-100 <= lightness_shift <= 100):
-        return "lightness_shift must be between -100 and 100"
+        raise InputError("lightness_shift must be between -100 and 100")
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -251,13 +245,11 @@ async def adjust_hsl(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return (
-            f"Adjusted HSL (h{hue_shift:+g}, s{saturation_shift:+g}, l{lightness_shift:+g}) "
-            f"on '{layer_name}' frame {frame_index} in {filename}"
-        )
-    return f"Failed to adjust HSL: {output}"
+    await run_script(script, filename)
+    return (
+        f"Adjusted HSL (h{hue_shift:+g}, s{saturation_shift:+g}, l{lightness_shift:+g}) "
+        f"on '{layer_name}' frame {frame_index} in {filename}"
+    )
 
 
 @mcp.tool()
@@ -293,15 +285,14 @@ async def apply_dither_gradient(
         horizontal: Run the gradient left-to-right instead of top-to-bottom
         create_if_missing: Create the cel if it does not exist
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
 
     start = _parse_hex_color(color_start)
     end = _parse_hex_color(color_end)
     if start is None or end is None:
-        return "Colors must use #RRGGBB values"
+        raise InputError("Colors must use #RRGGBB values")
     r1, g1, b1 = start
     r2, g2, b2 = end
     create = "true" if create_if_missing else "false"
@@ -352,14 +343,12 @@ async def apply_dither_gradient(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        direction = "horizontal" if horizontal else "vertical"
-        return (
-            f"Dithered {direction} gradient {color_start} -> {color_end} applied at "
-            f"({x},{y}) {width}x{height} on '{layer_name}' frame {frame_index} in {filename}"
-        )
-    return f"Failed to apply dither gradient: {output}"
+    await run_script(script, filename)
+    direction = "horizontal" if horizontal else "vertical"
+    return (
+        f"Dithered {direction} gradient {color_start} -> {color_end} applied at "
+        f"({x},{y}) {width}x{height} on '{layer_name}' frame {frame_index} in {filename}"
+    )
 
 
 @mcp.tool()
@@ -395,17 +384,16 @@ async def apply_dither_pattern(
         density: Fraction of color_b, 0.0-1.0 (default 0.5)
         create_if_missing: Create the cel if it does not exist
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
     if not (0 <= density <= 1):
-        return "density must be between 0.0 and 1.0"
+        raise InputError("density must be between 0.0 and 1.0")
 
     a = _parse_hex_color(color_a)
     b = _parse_hex_color(color_b)
     if a is None or b is None:
-        return "Colors must use #RRGGBB values"
+        raise InputError("Colors must use #RRGGBB values")
     r1, g1, b1 = a
     r2, g2, b2 = b
     create = "true" if create_if_missing else "false"
@@ -453,10 +441,8 @@ async def apply_dither_pattern(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return (
-            f"Dither pattern ({color_a}/{color_b}, density {density}) applied at "
-            f"({x},{y}) {width}x{height} on '{layer_name}' frame {frame_index} in {filename}"
-        )
-    return f"Failed to apply dither pattern: {output}"
+    await run_script(script, filename)
+    return (
+        f"Dither pattern ({color_a}/{color_b}, density {density}) applied at "
+        f"({x},{y}) {width}x{height} on '{layer_name}' frame {frame_index} in {filename}"
+    )

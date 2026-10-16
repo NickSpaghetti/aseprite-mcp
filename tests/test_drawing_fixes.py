@@ -1,5 +1,7 @@
 """B3 (cel-normalization, no silent clip) + B4 (per-pixel alpha) fixes."""
-from conftest import ok, run
+from conftest import fails, ok, run
+
+from aseprite_mcp.core.errors import InputError
 
 from aseprite_mcp.tools import canvas, drawing, pixel_read
 
@@ -50,6 +52,5 @@ def test_draw_accepts_short_hex(sprite):
 
 def test_draw_rejects_bad_hex(sprite):
     ok(run(canvas.add_layer(sprite, "bad")))
-    res = run(drawing.draw_pixels_at(sprite, "bad", 1,
-                                     [{"x": 0, "y": 0, "color": "#GG0000"}], True))
-    assert res.startswith(("Invalid", "Failed"))
+    fails(drawing.draw_pixels_at(sprite, "bad", 1,
+                                 [{"x": 0, "y": 0, "color": "#GG0000"}], True), InputError, "Invalid color")

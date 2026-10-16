@@ -2,7 +2,7 @@
 
 These are embedded at the top of generated batch scripts. Scripts built
 with them should print "ERROR:<message>" to signal failure and be run
-through AsepriteCommand.execute_lua_script_checked.
+through commands.run_script, which raises it as AsepriteError.
 """
 
 # Resolve a layer by name, searching inside groups.

@@ -1,6 +1,8 @@
 import json
 import os
-from ..core.commands import AsepriteCommand, lua_escape, reject_traversal
+from ..core.commands import lua_escape, run_script
+from ..core.boundary import require_file, require_safe_path
+from ..core.errors import AsepriteError, InputError
 from .. import mcp
 
 # Render a frame of the (cloned, flattened) sprite into a canvas-sized
@@ -53,17 +55,14 @@ async def render_onion_skin(
         scale: Integer nearest-neighbor scale factor (default 4)
         ghost_opacity: Opacity of ghost frames, 0-255 (default 100)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if scale < 1 or scale > 64:
-        return "scale must be between 1 and 64"
+        raise InputError("scale must be between 1 and 64")
     if not (0 <= ghost_opacity <= 255):
-        return "ghost_opacity must be between 0 and 255"
+        raise InputError("ghost_opacity must be between 0 and 255")
     if before < 0 or after < 0:
-        return "before and after must be >= 0"
-    err = reject_traversal(output_filename)
-    if err:
-        return err
+        raise InputError("before and after must be >= 0")
+    require_safe_path(output_filename)
     if not output_filename.lower().endswith(".png"):
         output_filename = f"{output_filename}.png"
 
@@ -119,13 +118,11 @@ async def render_onion_skin(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return (
-            f"Onion-skin render of frame {frame_index} "
-            f"(-{before}/+{after} ghosts) saved to {output_filename} at {scale}x"
-        )
-    return f"Failed to render onion skin: {output}"
+    await run_script(script, filename)
+    return (
+        f"Onion-skin render of frame {frame_index} "
+        f"(-{before}/+{after} ghosts) saved to {output_filename} at {scale}x"
+    )
 
 
 @mcp.tool()
@@ -145,8 +142,7 @@ async def compare_frames(filename: str, frame_a: int, frame_b: int) -> str:
         JSON with changed pixel count, total pixels, percent changed,
         and the bounding box of the changed region.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     script = f"""
     {_FLATTEN_FRAME}
@@ -199,9 +195,7 @@ async def compare_frames(filename: str, frame_a: int, frame_b: int) -> str:
         (changed > 0) and 1 or 0))
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if not success:
-        return f"Failed to compare frames: {output}"
+    output = await run_script(script, filename)
 
     for line in output.splitlines():
         if line.startswith("DIFF:"):
@@ -222,7 +216,7 @@ async def compare_frames(filename: str, frame_a: int, frame_b: int) -> str:
                     "height": max_y - min_y + 1,
                 }
             return json.dumps(result)
-    return "No diff data returned"
+    raise AsepriteError("No diff data returned")
 
 
 @mcp.tool()
@@ -242,10 +236,9 @@ async def get_color_stats(filename: str, frame_index: int = 1, top: int = 16) ->
         JSON with unique color count, opaque pixel count, and the top
         colors with usage counts.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if top < 1:
-        return "top must be >= 1"
+        raise InputError("top must be >= 1")
 
     script = f"""
     {_FLATTEN_FRAME}
@@ -284,9 +277,7 @@ async def get_color_stats(filename: str, frame_index: int = 1, top: int = 16) ->
     print("UNIQUE:" .. unique)
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if not success:
-        return f"Failed to get color stats: {output}"
+    output = await run_script(script, filename)
 
     colors = []
     opaque = 0

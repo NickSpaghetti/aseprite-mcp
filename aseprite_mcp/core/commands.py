@@ -1,10 +1,15 @@
+import os
 import subprocess
 import tempfile
-import os
+
 import dotenv
+
+from .errors import AsepriteError
 
 _ENV_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 dotenv.load_dotenv(dotenv_path=_ENV_PATH)
+
+ASEPRITE_PATH = os.getenv("ASEPRITE_PATH", "aseprite")
 
 
 def lua_escape(s: str) -> str:
@@ -18,88 +23,43 @@ def lua_escape(s: str) -> str:
     )
 
 
-def reject_traversal(path: str) -> str | None:
-    """Reject parent-directory traversal in a user-supplied path.
+def _failure_text(done: subprocess.CompletedProcess) -> str:
+    # Aseprite reports some failures, Lua syntax errors among them, on stdout
+    # rather than stderr, so fall back to stdout before giving up.
+    text = (done.stderr or "").strip() or (done.stdout or "").strip()
+    return text or f"Aseprite exited with code {done.returncode} and printed nothing"
 
-    Returns an error message string when the path contains a `..`
-    component, or None when the path looks safe.
 
-    The check works on normalized path components, so it does not
-    false-positive on filenames like `foo..bar.aseprite` (the previous
-    `'..' in path` substring check did). Absolute paths and tilde
-    expansion are not rejected here: this function targets traversal
-    only, not access scoping.
+async def run_cli(args: list[str]) -> str:
+    """Run Aseprite with command-line arguments and return its stdout.
+
+    Raises AsepriteError when Aseprite exits non-zero.
     """
-    parts = os.path.normpath(path).replace("\\", "/").split("/")
-    if ".." in parts:
-        return "Invalid filename: parent directory traversal not allowed"
-    return None
+    done = subprocess.run([ASEPRITE_PATH, *args], capture_output=True, text=True)
+    if done.returncode != 0:
+        raise AsepriteError(_failure_text(done))
+    return done.stdout
 
 
-class AsepriteCommand:
-    """Helper class for running Aseprite commands."""
-    
-    @staticmethod
-    def run_command(args):
-        """Run an Aseprite command with proper error handling.
-        
-        Args:
-            args: List of command arguments
-            
-        Returns:
-            tuple: (success, output) where success is a boolean and output is the command output
-        """
-        try:
-            cmd = [os.getenv('ASEPRITE_PATH', 'aseprite')] + args
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-            return True, result.stdout
-        except subprocess.CalledProcessError as e:
-            return False, e.stderr
-    
-    @staticmethod
-    def execute_lua_script(script_content, filename=None):
-        """Execute a Lua script in Aseprite.
-        
-        Args:
-            script_content: Lua script code to execute
-            filename: Optional filename to open before executing script
-            
-        Returns:
-            tuple: (success, output)
-        """
-        # Create a temporary file for the script
-        with tempfile.NamedTemporaryFile(suffix='.lua', delete=False, mode='w') as tmp:
-            tmp.write(script_content)
-            script_path = tmp.name
-        
-        try:
-            args = ["--batch"]
-            if filename and os.path.exists(filename):
-                args.append(filename)
-            args.extend(["--script", script_path])
-            
-            success, output = AsepriteCommand.run_command(args)
-            return success, output
-        finally:
-            # Clean up the temporary script file
-            os.remove(script_path)
+async def run_script(script: str, filename: str | None = None, check_errors: bool = True) -> str:
+    """Run a Lua script in batch mode, with `filename` opened first, and return stdout.
 
-    @staticmethod
-    def execute_lua_script_checked(script_content, filename=None):
-        """Execute a Lua script and surface in-script errors.
+    Batch-mode scripts cannot set the process exit code, so curated scripts
+    signal failure by printing a line starting with "ERROR:". With
+    check_errors, the first such line is raised as AsepriteError. Pass
+    check_errors=False for user scripts, whose output is returned untouched.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".lua", delete=False, mode="w") as tmp:
+        tmp.write(script)
+        script_path = tmp.name
+    try:
+        args = ["--batch"] + ([filename] if filename else []) + ["--script", script_path]
+        output = await run_cli(args)
+    finally:
+        os.remove(script_path)
 
-        Scripts using this helper signal failure by printing a line
-        starting with "ERROR:" (batch-mode scripts cannot affect the
-        process exit code from Lua).
-
-        Returns:
-            tuple: (success, output) where output is the error message
-            when an ERROR: line was printed, or the raw stdout otherwise.
-        """
-        success, output = AsepriteCommand.execute_lua_script(script_content, filename)
-        if not success:
-            return False, output
+    if check_errors:
         for line in output.splitlines():
             if line.startswith("ERROR:"):
-                return False, line[len("ERROR:"):]
-        return True, output
+                raise AsepriteError(line[len("ERROR:"):])
+    return output

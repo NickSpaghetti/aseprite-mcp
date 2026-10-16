@@ -9,7 +9,9 @@ import json
 
 import pytest
 
-from conftest import BASE, ok, run
+from conftest import BASE, fails, ok, run
+
+from aseprite_mcp.core.errors import AsepriteError
 from aseprite_mcp.tools import animation, canvas, drawing, layers
 
 
@@ -63,11 +65,9 @@ def test_duplicate_into_group(fresh):
 
 
 def test_add_layer_unknown_group_fails(fresh):
-    result = run(canvas.add_layer(fresh, "child", "NOPE"))
-    assert str(result).startswith(("Failed", "ERROR")), result
+    fails(canvas.add_layer(fresh, "child", "NOPE"), AsepriteError, "Group not found")
 
 
 def test_add_layer_target_not_a_group_fails(fresh):
     ok(run(canvas.add_layer(fresh, "plain")))  # a normal layer, not a group
-    result = run(canvas.add_layer(fresh, "child", "plain"))
-    assert str(result).startswith(("Failed", "ERROR")), result
+    fails(canvas.add_layer(fresh, "child", "plain"), AsepriteError, "not a group")

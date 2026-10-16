@@ -1,6 +1,7 @@
 import json
-import os
-from ..core.commands import AsepriteCommand, lua_escape
+from ..core.commands import lua_escape, run_script
+from ..core.boundary import require_file
+from ..core.errors import InputError
 from .. import mcp
 
 _FIND_SLICE = """
@@ -32,12 +33,11 @@ async def create_slice(
         width: Slice width
         height: Slice height
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
     if not name:
-        return "Slice name cannot be empty"
+        raise InputError("Slice name cannot be empty")
 
     safe_name = lua_escape(name)
     script = f"""
@@ -56,10 +56,8 @@ async def create_slice(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Slice '{name}' created at ({x},{y}) {width}x{height} in {filename}"
-    return f"Failed to create slice: {output}"
+    await run_script(script, filename)
+    return f"Slice '{name}' created at ({x},{y}) {width}x{height} in {filename}"
 
 
 @mcp.tool()
@@ -84,10 +82,9 @@ async def set_slice_center(
         width: Center-rect width
         height: Center-rect height
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
 
     safe_name = lua_escape(name)
     script = f"""
@@ -106,10 +103,8 @@ async def set_slice_center(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Slice '{name}' 9-patch center set to ({x},{y}) {width}x{height} in {filename}"
-    return f"Failed to set slice center: {output}"
+    await run_script(script, filename)
+    return f"Slice '{name}' 9-patch center set to ({x},{y}) {width}x{height} in {filename}"
 
 
 @mcp.tool()
@@ -122,8 +117,7 @@ async def set_slice_pivot(filename: str, name: str, x: int, y: int) -> str:
         x: Pivot x, relative to the slice
         y: Pivot y, relative to the slice
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     safe_name = lua_escape(name)
     script = f"""
@@ -142,10 +136,8 @@ async def set_slice_pivot(filename: str, name: str, x: int, y: int) -> str:
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Slice '{name}' pivot set to ({x},{y}) in {filename}"
-    return f"Failed to set slice pivot: {output}"
+    await run_script(script, filename)
+    return f"Slice '{name}' pivot set to ({x},{y}) in {filename}"
 
 
 @mcp.tool()
@@ -155,8 +147,7 @@ async def list_slices(filename: str) -> str:
     Returns:
         JSON array of {name, x, y, width, height, center?, pivot?}.
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     # Emit one JSON object per slice (name via Lua %q) instead of a
     # '|'-delimited line, so a '|' (or comma/colon) in a slice name can no
@@ -182,9 +173,7 @@ async def list_slices(filename: str) -> str:
     print("DONE")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if not success:
-        return f"Failed to list slices: {output}"
+    output = await run_script(script, filename)
 
     slices = []
     for line in output.splitlines():
@@ -202,8 +191,7 @@ async def delete_slice(filename: str, name: str) -> str:
         filename: Aseprite file to modify
         name: Slice name to delete
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     safe_name = lua_escape(name)
     script = f"""
@@ -222,7 +210,5 @@ async def delete_slice(filename: str, name: str) -> str:
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return f"Slice '{name}' deleted from {filename}"
-    return f"Failed to delete slice: {output}"
+    await run_script(script, filename)
+    return f"Slice '{name}' deleted from {filename}"

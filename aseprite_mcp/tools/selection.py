@@ -1,5 +1,6 @@
-import os
-from ..core.commands import AsepriteCommand, lua_escape
+from ..core.commands import lua_escape, run_script
+from ..core.boundary import require_file
+from ..core.errors import InputError
 from ..core.lua import FIND_LAYER, NORMALIZE_CEL, PSET
 from ..core.colors import parse_hex_color
 from .. import mcp
@@ -40,10 +41,9 @@ async def move_region(
         dest_x: New left edge for the region
         dest_y: New top edge for the region
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -93,13 +93,11 @@ async def move_region(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return (
-            f"Moved {width}x{height} region from ({x},{y}) to ({dest_x},{dest_y}) "
-            f"on '{layer_name}' frame {frame_index} in {filename}"
-        )
-    return f"Failed to move region: {output}"
+    await run_script(script, filename)
+    return (
+        f"Moved {width}x{height} region from ({x},{y}) to ({dest_x},{dest_y}) "
+        f"on '{layer_name}' frame {frame_index} in {filename}"
+    )
 
 
 @mcp.tool()
@@ -134,10 +132,9 @@ async def copy_region(
         target_layer_name: Destination layer (default: same as source)
         target_frame_index: Destination frame (default: same as source)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
 
     safe_layer = lua_escape(layer_name)
     safe_target_layer = lua_escape(target_layer_name or layer_name)
@@ -195,13 +192,11 @@ async def copy_region(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return (
-            f"Copied {width}x{height} region from ({x},{y}) to ({dest_x},{dest_y}) "
-            f"in {filename}"
-        )
-    return f"Failed to copy region: {output}"
+    await run_script(script, filename)
+    return (
+        f"Copied {width}x{height} region from ({x},{y}) to ({dest_x},{dest_y}) "
+        f"in {filename}"
+    )
 
 
 @mcp.tool()
@@ -227,10 +222,9 @@ async def erase_region(
         width: Region width
         height: Region height
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -260,13 +254,11 @@ async def erase_region(
     print("OK")
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if success:
-        return (
-            f"Erased {width}x{height} region at ({x},{y}) on '{layer_name}' "
-            f"frame {frame_index} in {filename}"
-        )
-    return f"Failed to erase region: {output}"
+    await run_script(script, filename)
+    return (
+        f"Erased {width}x{height} region at ({x},{y}) on '{layer_name}' "
+        f"frame {frame_index} in {filename}"
+    )
 
 
 @mcp.tool()
@@ -286,15 +278,14 @@ async def erase_color(
         color: Hex color to erase, e.g. "#FF00FF"
         tolerance: Per-channel tolerance 0-255 (default 0 = exact match)
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     rgb = _parse_hex_color(color)
     if rgb is None:
-        return f"Invalid color value: {color}"
+        raise InputError(f"Invalid color value: {color}")
     r, g, b = rgb
     if tolerance < 0 or tolerance > 255:
-        return "Tolerance must be between 0 and 255"
+        raise InputError("Tolerance must be between 0 and 255")
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -334,9 +325,7 @@ async def erase_color(
     print("COUNT:" .. count)
     """
 
-    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
-    if not success:
-        return f"Failed to erase color: {output}"
+    output = await run_script(script, filename)
 
     count = "?"
     for line in output.splitlines():

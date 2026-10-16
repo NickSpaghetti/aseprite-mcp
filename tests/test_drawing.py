@@ -1,5 +1,7 @@
 """Drawing tools added in this round (drawing.py)."""
-from conftest import ok, run
+from conftest import fails, ok, run
+
+from aseprite_mcp.core.errors import InputError
 
 from aseprite_mcp.tools import drawing, pixel_read
 
@@ -11,5 +13,4 @@ def test_draw_ellipse_at(sprite):
 
 
 def test_draw_ellipse_rejects_bad_radius(sprite):
-    result = run(drawing.draw_ellipse_at(sprite, "body", 1, 16, 16, 0, 4, "#306230"))
-    assert "must be > 0" in result
+    fails(drawing.draw_ellipse_at(sprite, "body", 1, 16, 16, 0, 4, "#306230"), InputError, "must be > 0")

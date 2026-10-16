@@ -14,6 +14,7 @@ import shutil
 import sys
 
 import pytest
+from mcp.server.fastmcp.exceptions import ToolError
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -29,11 +30,16 @@ def run(coro):
 
 
 def ok(result):
-    """Assert a tool call did not return an error message."""
-    assert not str(result).startswith(
-        ("Failed", "ERROR", "Invalid", "Script failed")
-    ), result
+    """Pass a successful tool result through. Failures raise before reaching here."""
+    assert isinstance(result, str), result
     return result
+
+
+def fails(coro, error=ToolError, match=None):
+    """Assert a tool call raises `error` (optionally matching `match`); return the message."""
+    with pytest.raises(error, match=match) as info:
+        run(coro)
+    return str(info.value)
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -7,7 +7,9 @@ import json
 import os
 
 import pytest
-from conftest import ok, run
+from conftest import fails, ok, run
+
+from aseprite_mcp.core.errors import InputError
 from PIL import Image
 
 from aseprite_mcp.core import fonts as fontlib
@@ -59,25 +61,19 @@ def _system_truetype():
 # ── discovery / errors ────────────────────────────────────────────────
 
 def test_unknown_font_is_reported():
-    out = run(text.measure_text("ABC", "definitely-not-a-font"))
-    assert out.startswith("ERROR")
-    assert "not found" in out
+    fails(text.measure_text("ABC", "definitely-not-a-font"), InputError, "not found")
 
 
 def test_list_fonts_never_raises():
-    out = run(text.list_text_fonts())
-    assert not out.startswith("ERROR")
+    ok(run(text.list_text_fonts()))
 
 
 def test_bitmap_font_rejects_zero_size(bitmap_font):
-    out = run(text.measure_text("A", bitmap_font, 0))
-    assert out.startswith("ERROR")
-    assert "scale factor" in out
+    fails(text.measure_text("A", bitmap_font, 0), InputError, "scale factor")
 
 
 def test_rejects_bad_anchor(sprite, bitmap_font):
-    out = run(text.draw_text(sprite, "A", 0, 0, bitmap_font, anchor="middle"))
-    assert "Invalid anchor" in out
+    fails(text.draw_text(sprite, "A", 0, 0, bitmap_font, anchor="middle"), InputError, "Invalid anchor")
 
 
 # ── measurement ───────────────────────────────────────────────────────

@@ -1,7 +1,9 @@
 """Palette tools (palette.py)."""
 import json
 
-from conftest import ok, run
+from conftest import fails, ok, run
+
+from aseprite_mcp.core.errors import InputError
 
 from aseprite_mcp.tools import palette
 
@@ -18,8 +20,7 @@ def test_apply_palette_preset(sprite):
 
 
 def test_apply_palette_preset_rejects_unknown(sprite):
-    result = run(palette.apply_palette_preset(sprite, "nonsense"))
-    assert result.startswith("Unknown preset")
+    fails(palette.apply_palette_preset(sprite, "nonsense"), InputError, "^Unknown preset")
 
 
 def test_quantize_to_palette(sprite):

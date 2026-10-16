@@ -1,5 +1,6 @@
-import os
-from ..core.commands import AsepriteCommand
+from ..core.commands import run_script
+from ..core.boundary import require_file
+from ..core.errors import InputError
 from .. import mcp
 
 
@@ -29,11 +30,9 @@ async def run_lua_script(script: str, filename: str = "") -> str:
         filename: Optional Aseprite file to open before running
     """
     if not script.strip():
-        return "Script cannot be empty"
-    if filename and not os.path.exists(filename):
-        return f"File {filename} not found"
+        raise InputError("Script cannot be empty")
+    if filename:
+        require_file(filename)
 
-    success, output = AsepriteCommand.execute_lua_script(script, filename or None)
-    if success:
-        return output if output.strip() else "Script executed (no output printed)"
-    return f"Script failed: {output}"
+    output = await run_script(script, filename or None, check_errors=False)
+    return output if output.strip() else "Script executed (no output printed)"

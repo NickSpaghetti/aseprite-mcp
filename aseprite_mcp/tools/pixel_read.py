@@ -1,6 +1,7 @@
 import json
-import os
-from ..core.commands import AsepriteCommand, lua_escape
+from ..core.commands import lua_escape, run_script
+from ..core.boundary import require_file
+from ..core.errors import AsepriteError, InputError
 from ..core.lua import FIND_LAYER
 from .analysis import _FLATTEN_FRAME
 from .. import mcp
@@ -23,8 +24,7 @@ async def get_pixel_color(
         layer_name: Layer to read from (uses active layer when empty)
         frame_index: Frame index starting at 1
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     safe_layer = lua_escape(layer_name)
     script = f"""
@@ -62,19 +62,15 @@ async def get_pixel_color(
     print(string.format("PIXEL:%d,%d,%d,%d", r, g, b, a))
     """
 
-    success, output = AsepriteCommand.execute_lua_script(script, filename)
-    if not success:
-        return f"Failed to read pixel: {output}"
+    output = await run_script(script, filename)
 
     for line in output.splitlines():
-        if line.startswith("ERROR:"):
-            return f"Failed to read pixel: {line[6:]}"
         if line.startswith("PIXEL:"):
             parts = line[6:].split(",")
             r, g, b, a = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
             return f"#{r:02x}{g:02x}{b:02x} (r={r}, g={g}, b={b}, a={a})"
 
-    return "No pixel data returned"
+    raise AsepriteError("No pixel data returned")
 
 
 @mcp.tool()
@@ -101,10 +97,9 @@ async def get_pixels_rect(
     Returns:
         JSON array of {x, y, hex, r, g, b, a} objects
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
 
     safe_layer = lua_escape(layer_name)
     x_end = x + width - 1
@@ -153,14 +148,10 @@ async def get_pixels_rect(
     end
     """
 
-    success, output = AsepriteCommand.execute_lua_script(script, filename)
-    if not success:
-        return f"Failed to read pixels: {output}"
+    output = await run_script(script, filename)
 
     pixels = []
     for line in output.splitlines():
-        if line.startswith("ERROR:"):
-            return f"Failed to read pixels: {line[6:]}"
         if line.startswith("PIXEL:"):
             parts = line[6:].split(",")
             px, py, r, g, b, a = [int(p) for p in parts]
@@ -171,7 +162,7 @@ async def get_pixels_rect(
             })
 
     if not pixels:
-        return "No pixel data returned"
+        raise AsepriteError("No pixel data returned")
     return json.dumps(pixels)
 
 
@@ -189,8 +180,7 @@ async def get_composite_pixel(filename: str, x: int, y: int, frame_index: int = 
         y: Y coordinate (sprite-global)
         frame_index: Frame index starting at 1
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
 
     script = f"""
     {_FLATTEN_FRAME}
@@ -212,16 +202,12 @@ async def get_composite_pixel(filename: str, x: int, y: int, frame_index: int = 
     print(string.format("PIXEL:%d,%d,%d,%d", r, g, b, a))
     """
 
-    success, output = AsepriteCommand.execute_lua_script(script, filename)
-    if not success:
-        return f"Failed to read composite pixel: {output}"
+    output = await run_script(script, filename)
     for line in output.splitlines():
-        if line.startswith("ERROR:"):
-            return f"Failed to read composite pixel: {line[6:]}"
         if line.startswith("PIXEL:"):
             r, g, b, a = (int(p) for p in line[6:].split(","))
             return f"#{r:02x}{g:02x}{b:02x} (r={r}, g={g}, b={b}, a={a})"
-    return "No pixel data returned"
+    raise AsepriteError("No pixel data returned")
 
 
 @mcp.tool()
@@ -249,10 +235,9 @@ async def get_composite_rect(
     Returns:
         JSON array of {x, y, hex, r, g, b, a} objects
     """
-    if not os.path.exists(filename):
-        return f"File {filename} not found"
+    require_file(filename)
     if width <= 0 or height <= 0:
-        return "Width and height must be > 0"
+        raise InputError("Width and height must be > 0")
 
     x_end, y_end = x + width - 1, y + height - 1
     script = f"""
@@ -280,13 +265,9 @@ async def get_composite_rect(
     end
     """
 
-    success, output = AsepriteCommand.execute_lua_script(script, filename)
-    if not success:
-        return f"Failed to read composite pixels: {output}"
+    output = await run_script(script, filename)
     pixels = []
     for line in output.splitlines():
-        if line.startswith("ERROR:"):
-            return f"Failed to read composite pixels: {line[6:]}"
         if line.startswith("PIXEL:"):
             px, py, r, g, b, a = (int(p) for p in line[6:].split(","))
             pixels.append({
@@ -295,5 +276,5 @@ async def get_composite_rect(
                 "r": r, "g": g, "b": b, "a": a,
             })
     if not pixels:
-        return "No pixel data returned"
+        raise AsepriteError("No pixel data returned")
     return json.dumps(pixels)

@@ -1,7 +1,9 @@
 """Tilemap tools (tilemap.py)."""
 import json
 
-from conftest import ok, run
+from conftest import fails, ok, run
+
+from aseprite_mcp.core.errors import AsepriteError
 
 from aseprite_mcp.tools import tilemap
 
@@ -36,6 +38,5 @@ def test_set_and_get_tiles(sprite):
 
 
 def test_set_tiles_rejects_out_of_range_index(sprite):
-    result = run(tilemap.set_tiles(sprite, "terrain", 1, [
-        {"col": 0, "row": 0, "tile_index": 99}]))
-    assert "out of range" in result
+    fails(tilemap.set_tiles(sprite, "terrain", 1, [
+        {"col": 0, "row": 0, "tile_index": 99}]), AsepriteError, "out of range")

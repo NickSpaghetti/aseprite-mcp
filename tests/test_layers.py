@@ -1,5 +1,7 @@
 """Layer management tools (layers.py)."""
-from conftest import ok, run
+from conftest import fails, ok, run
+
+from aseprite_mcp.core.errors import InputError
 
 from aseprite_mcp.tools import canvas, drawing, layers
 
@@ -20,8 +22,7 @@ def test_set_layer_blend_mode(sprite):
 
 
 def test_set_layer_blend_mode_rejects_unknown(sprite):
-    result = run(layers.set_layer_blend_mode(sprite, "shade copy", "nonsense"))
-    assert result.startswith("Unknown blend mode")
+    fails(layers.set_layer_blend_mode(sprite, "shade copy", "nonsense"), InputError, "^Unknown blend mode")
 
 
 def test_reorder_layer(sprite):
