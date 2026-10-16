@@ -1,8 +1,7 @@
 -- Hand-rolled pixel effects (tools/fx.py). Colours arrive as [r, g, b, a].
 local lib = ...
 
-local rgba, R, G, B, A = app.pixelColor.rgba, app.pixelColor.rgbaR, app.pixelColor.rgbaG,
-  app.pixelColor.rgbaB, app.pixelColor.rgbaA
+local rgba, A = app.pixelColor.rgba, app.pixelColor.rgbaA
 
 -- RGB <-> HSL. h in [0, 360), s and l in [0, 1].
 local function rgb_to_hsl(r, g, b)
@@ -44,42 +43,26 @@ local function hsl_to_rgb(h, s, l)
   return math.floor((r1 + m) * 255 + 0.5), math.floor((g1 + m) * 255 + 0.5), math.floor((b1 + m) * 255 + 0.5)
 end
 
--- Calls fn(r, g, b, a) for every opaque pixel of the existing cel; when fn
--- returns r, g, b the pixel is rewritten with its alpha kept. Returns the
--- number of pixels rewritten.
-local function map_opaque(sprite, a, fn)
-  local cel = lib.cel(lib.layer(sprite, a.layer), lib.frame(sprite, a.frame))
-  local count = 0
-  for it in cel.image:pixels() do
-    local v = it()
-    local alpha = A(v)
-    if alpha > 0 then
-      local r, g, b = fn(R(v), G(v), B(v), alpha)
-      if r then
-        it(rgba(r, g, b, alpha))
-        count = count + 1
-      end
-    end
-  end
-  return count
+local function target_cel(sprite, a)
+  return lib.cel(lib.layer(sprite, a.layer), lib.frame(sprite, a.frame))
 end
 
+-- Both keep each pixel's alpha.
 lib.edit("fx.replace_color", function(sprite, a)
-  local from, to, tol = a.from_color, a.to_color, a.tolerance
-  local count = map_opaque(sprite, a, function(r, g, b)
-    if math.abs(r - from[1]) <= tol and math.abs(g - from[2]) <= tol and math.abs(b - from[3]) <= tol then
-      return to[1], to[2], to[3]
-    end
+  local to = a.to_color
+  local count = lib.map_opaque(target_cel(sprite, a), function(r, g, b, alpha)
+    if lib.near(r, g, b, a.from_color, a.tolerance) then return rgba(to[1], to[2], to[3], alpha) end
   end)
   return { count = count }
 end)
 
 lib.edit("fx.adjust_hsl", function(sprite, a)
-  map_opaque(sprite, a, function(r, g, b)
+  lib.map_opaque(target_cel(sprite, a), function(r, g, b, alpha)
     local h, s, l = rgb_to_hsl(r, g, b)
     s = math.min(1, math.max(0, s + a.saturation / 100))
     l = math.min(1, math.max(0, l + a.lightness / 100))
-    return hsl_to_rgb(h + a.hue, s, l)
+    local nr, ng, nb = hsl_to_rgb(h + a.hue, s, l)
+    return rgba(nr, ng, nb, alpha)
   end)
 end)
 

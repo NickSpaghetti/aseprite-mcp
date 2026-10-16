@@ -1,7 +1,6 @@
-from ..core.commands import lua_escape, run_script
+from ..core.commands import call
 from ..core.boundary import require_file
 from ..core.errors import InputError
-from ..core.lua import FIND_LAYER
 from .. import mcp
 
 
@@ -24,53 +23,7 @@ async def flip_layer(
     if direction not in ("horizontal", "vertical"):
         raise InputError("direction must be 'horizontal' or 'vertical'")
 
-    safe_layer = lua_escape(layer_name)
-    flip_h = "true" if direction == "horizontal" else "false"
-
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then print("ERROR:Frame index out of range") return end
-
-    {FIND_LAYER}
-    local target = find_layer(spr, "{safe_layer}")
-    if not target then print("ERROR:Layer not found") return end
-
-    local cel = target:cel(spr.frames[idx])
-    if not cel then print("ERROR:No cel at that layer/frame") return end
-
-    app.transaction(function()
-        local img = cel.image
-        local w = img.width
-        local h = img.height
-        local flip_horizontal = {flip_h}
-
-        local pixels = {{}}
-        for py = 0, h - 1 do
-            pixels[py] = {{}}
-            for px = 0, w - 1 do
-                pixels[py][px] = img:getPixel(px, py)
-            end
-        end
-
-        for py = 0, h - 1 do
-            for px = 0, w - 1 do
-                if flip_horizontal then
-                    img:putPixel(px, py, pixels[py][w - 1 - px])
-                else
-                    img:putPixel(px, py, pixels[h - 1 - py][px])
-                end
-            end
-        end
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("transform.flip", filename, layer=layer_name, frame=frame_index, direction=direction)
     return f"Layer '{layer_name}' flipped {direction}ly in {filename}"
 
 
@@ -93,76 +46,7 @@ async def rotate_layer(
     if angle not in (90, 180, 270):
         raise InputError("angle must be 90, 180, or 270")
 
-    safe_layer = lua_escape(layer_name)
-
-    if angle == 180:
-        rotate_lua = """
-        local w = img.width
-        local h = img.height
-        local pixels = {}
-        for py = 0, h - 1 do
-            pixels[py] = {}
-            for px = 0, w - 1 do
-                pixels[py][px] = img:getPixel(px, py)
-            end
-        end
-        for py = 0, h - 1 do
-            for px = 0, w - 1 do
-                img:putPixel(px, py, pixels[h - 1 - py][w - 1 - px])
-            end
-        end
-        """
-    elif angle == 90:
-        # 90° clockwise: (px, py) → (old_h-1-py, px) in new image (new_w=old_h, new_h=old_w)
-        rotate_lua = """
-        local old_w = img.width
-        local old_h = img.height
-        local new_img = Image(old_h, old_w, img.colorMode)
-        for py = 0, old_h - 1 do
-            for px = 0, old_w - 1 do
-                new_img:putPixel(old_h - 1 - py, px, img:getPixel(px, py))
-            end
-        end
-        cel.image = new_img
-        """
-    else:
-        # 270° clockwise (= 90° CCW): (px, py) → (py, old_w-1-px) in new image (new_w=old_h, new_h=old_w)
-        rotate_lua = """
-        local old_w = img.width
-        local old_h = img.height
-        local new_img = Image(old_h, old_w, img.colorMode)
-        for py = 0, old_h - 1 do
-            for px = 0, old_w - 1 do
-                new_img:putPixel(py, old_w - 1 - px, img:getPixel(px, py))
-            end
-        end
-        cel.image = new_img
-        """
-
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then print("ERROR:Frame index out of range") return end
-
-    {FIND_LAYER}
-    local target = find_layer(spr, "{safe_layer}")
-    if not target then print("ERROR:Layer not found") return end
-
-    local cel = target:cel(spr.frames[idx])
-    if not cel then print("ERROR:No cel at that layer/frame") return end
-
-    app.transaction(function()
-        local img = cel.image
-        {rotate_lua}
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("transform.rotate", filename, layer=layer_name, frame=frame_index, angle=angle)
     return f"Layer '{layer_name}' rotated {angle}° clockwise in {filename}"
 
 
@@ -179,19 +63,7 @@ async def resize_canvas(filename: str, width: int, height: int) -> str:
     if width <= 0 or height <= 0:
         raise InputError("Width and height must be > 0")
 
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    app.transaction(function()
-        spr:resize({width}, {height})
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("transform.resize", filename, width=width, height=height)
     return f"Canvas resized to {width}x{height} in {filename}"
 
 
@@ -210,21 +82,5 @@ async def crop_canvas(filename: str, x: int, y: int, width: int, height: int) ->
     if width <= 0 or height <= 0:
         raise InputError("Width and height must be > 0")
 
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    if {x} >= spr.width or {y} >= spr.height or {x} + {width} <= 0 or {y} + {height} <= 0 then
-        print("ERROR:Crop rect is fully outside the canvas") return
-    end
-
-    app.transaction(function()
-        spr:crop({x}, {y}, {width}, {height})
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
+    await call("transform.crop", filename, x=x, y=y, width=width, height=height)
     return f"Canvas cropped to ({x},{y}) {width}x{height} in {filename}"

@@ -65,8 +65,8 @@ function lib.find_layer(sprite, name)
   return resolve(sprite.layers, 1)
 end
 
-function lib.layer(sprite, name)
-  return lib.find_layer(sprite, name) or lib.fail("LayerNotFound", "Layer not found")
+function lib.layer(sprite, name, message)
+  return lib.find_layer(sprite, name) or lib.fail("LayerNotFound", message or "Layer not found")
 end
 
 function lib.group(sprite, name, not_found_message)
@@ -163,6 +163,44 @@ function lib.painter(sprite, cel)
   return function(x, y, color)
     if x >= 0 and y >= 0 and x < width and y < height then image:putPixel(x - ox, y - oy, color) end
   end
+end
+
+-- get(x, y) for sprite coordinates on `cel`: the pixel value there, or 0
+-- (transparent) outside the canvas or outside the cel's image.
+function lib.reader(sprite, cel)
+  local image, ox, oy = cel.image, cel.position.x, cel.position.y
+  local width, height = sprite.width, sprite.height
+  return function(x, y)
+    if x < 0 or y < 0 or x >= width or y >= height then return 0 end
+    local ix, iy = x - ox, y - oy
+    if ix < 0 or iy < 0 or ix >= image.width or iy >= image.height then return 0 end
+    return image:getPixel(ix, iy)
+  end
+end
+
+-- Calls fn(r, g, b, a) for every opaque pixel of `cel`; when fn returns a
+-- pixel value the pixel is set to it. Returns how many pixels were set.
+function lib.map_opaque(cel, fn)
+  local pc = app.pixelColor
+  local count = 0
+  for it in cel.image:pixels() do
+    local v = it()
+    local alpha = pc.rgbaA(v)
+    if alpha > 0 then
+      local new = fn(pc.rgbaR(v), pc.rgbaG(v), pc.rgbaB(v), alpha)
+      if new then
+        it(new)
+        count = count + 1
+      end
+    end
+  end
+  return count
+end
+
+-- True when (r, g, b) is within `tolerance` of `target` on every channel.
+function lib.near(r, g, b, target, tolerance)
+  return math.abs(r - target[1]) <= tolerance and math.abs(g - target[2]) <= tolerance
+    and math.abs(b - target[3]) <= tolerance
 end
 
 -- The target of the tools that take no layer or frame: the layer Aseprite
