@@ -326,6 +326,28 @@ docker run --rm -i --env-file .env aseprite-mcp:latest
 
 If installed, the binary will be at `/opt/steamapps/common/Aseprite/aseprite` and `ASEPRITE_PATH` will be picked up automatically.
 
+### Arch Linux (AUR Aseprite, no Steam)
+
+`Dockerfile.arch` builds an Arch-based image that installs the Aseprite package you already built from the AUR, so no Steam login is needed:
+
+```bash
+yay -S aseprite                     # once, on the host; leaves the package in ~/.cache/yay/aseprite
+scripts/docker-arch-build.sh        # builds aseprite-mcp:arch (ASEPRITE_PKG_DIR overrides the package dir)
+```
+
+`scripts/docker-arch-run.sh` starts the server over stdio. It mounts the current directory (or `ASEPRITE_MCP_WORKDIR`) at the same path inside the container, so only files under it are reachable, and runs as your user so created files aren't root-owned. Register it in a project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "aseprite": {
+      "type": "stdio",
+      "command": "/path/to/aseprite-mcp/scripts/docker-arch-run.sh"
+    }
+  }
+}
+```
+
 ## Local Installation
 
 ### Prerequisites

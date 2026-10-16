@@ -1,0 +1,27 @@
+# Arch-based image for diivi/aseprite-mcp. Aseprite isn't in the official
+# Arch repos, so this installs the package already built from the AUR on the
+# host (passed in as the `aseprite_pkg` build context) instead of using
+# SteamCMD - no Steam login needed. Build with scripts/docker-arch-build.sh.
+FROM archlinux:latest
+
+RUN --mount=type=bind,from=aseprite_pkg,target=/pkg \
+    pacman -Syu --noconfirm --needed uv ttf-dejavu \
+    && pacman -U --noconfirm /pkg/aseprite-[0-9]*.pkg.tar.zst \
+    && pacman -Scc --noconfirm
+
+# uv installs the repo's pinned Python (.python-version) - Arch's system
+# Python is newer than some dependencies publish wheels for.
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
+WORKDIR /app
+COPY . .
+RUN uv sync --frozen --no-dev \
+    && chmod -R a+rX /opt/uv-python \
+    && chmod -R a+rX /app
+
+# Runs as the host user (see scripts/docker-arch-run.sh), so give Aseprite a writable HOME
+# for its config instead of touching the host's ~/.config/aseprite.
+ENV ASEPRITE_PATH=/usr/bin/aseprite \
+    PYTHONPATH=/app \
+    HOME=/tmp/home
+
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "aseprite_mcp"]
