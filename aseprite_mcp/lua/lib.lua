@@ -226,6 +226,21 @@ function lib.composite(sprite, index)
   return image
 end
 
+-- `image` scaled up by a whole number, nearest neighbour.
+function lib.scale_image(image, k)
+  if k == 1 then return image end
+  local out = Image(image.width * k, image.height * k, image.colorMode)
+  for y = 0, image.height - 1 do
+    for x = 0, image.width - 1 do
+      local v = image:getPixel(x, y)
+      for oy = 0, k - 1 do
+        for ox = 0, k - 1 do out:putPixel(x * k + ox, y * k + oy, v) end
+      end
+    end
+  end
+  return out
+end
+
 -- A pixel value as {r, g, b, a}.
 function lib.rgba(v)
   local pc = app.pixelColor

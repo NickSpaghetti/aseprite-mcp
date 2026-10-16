@@ -60,15 +60,6 @@ class AsepriteWorker:
             reply, stray = self._request(request)
         return "\n".join(filter(None, [reply.get("output", ""), *stray]))
 
-    def run_cli(self, args: list[str]) -> subprocess.CompletedProcess:
-        """Run a separate `aseprite <args>` process, in turn with the worker's requests."""
-        with self._lock:
-            try:
-                return subprocess.run([self.executable, *args], capture_output=True, text=True,
-                                      encoding="utf-8", timeout=self.timeout)
-            except subprocess.TimeoutExpired:
-                raise AsepriteError(f"Aseprite did not finish within {self.timeout:g}s and was killed") from None
-
     def close(self) -> None:
         with self._lock:
             self._stop()

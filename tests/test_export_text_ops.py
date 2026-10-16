@@ -198,3 +198,21 @@ def test_stamp_without_effects_is_just_the_ink():
     s = text._compose_stamp({(3, -2), (4, -2)}, [1, 2, 3, 4])
     assert (s["left"], s["top"], s["width"], s["height"]) == (3, -2, 2, 1)
     assert s["pixels"] == [[0, 0, 1], [1, 0, 1]] and s["colors"] == [[1, 2, 3, 4]]
+
+
+# ── no second process (increment 4) ───────────────────────────────────
+
+def test_exports_start_no_process(two_frames, out_dir, monkeypatch):
+    import subprocess
+    from aseprite_mcp.core import commands
+    run(commands.run_script('print("warm")'))          # the worker itself is already running
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(("run", a)))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: calls.append(("Popen", a)))
+    ok(run(animation.set_tag(two_frames, "t", 1, 2)))
+    ok(run(export.export_sprite(two_frames, f"{out_dir}/a", "gif")))
+    ok(run(export.export_frame(two_frames, 2, f"{out_dir}/b.png", 2)))
+    ok(run(export.export_spritesheet(two_frames, f"{out_dir}/c.png", "packed", f"{out_dir}/c.json")))
+    ok(run(export.export_layers(two_frames, f"{out_dir}/d")))
+    ok(run(export.export_tag(two_frames, "t", f"{out_dir}/e.gif")))
+    assert calls == []

@@ -1,7 +1,7 @@
 import glob
 import os
 
-from ..core.commands import call, run_cli
+from ..core.commands import call
 from ..core.boundary import require_file, require_safe_path
 from ..core.errors import AsepriteError, InputError
 from .. import mcp
@@ -27,11 +27,6 @@ def _written(before: dict[str, int], pattern: str) -> list[str]:
     return sorted(p for p, mtime in _snapshot(pattern).items() if before.get(p) != mtime)
 
 
-async def _tag_range(filename: str, tag_name: str) -> tuple[int, int]:
-    result = await call("export.tag_range", filename, name=tag_name)
-    return result["first"], result["last"]
-
-
 @mcp.tool()
 async def export_sprite(filename: str, output_filename: str, format: str = "png") -> str:
     """Export the Aseprite file to another format.
@@ -55,9 +50,9 @@ async def export_sprite(filename: str, output_filename: str, format: str = "png"
     # siblings (out1.png, out2.png, ...) instead of the exact name, so those count.
     pattern = _pattern(output_filename, "*")
     before = _snapshot(pattern)
-    await run_cli(["--batch", filename, "--save-as", output_filename])
+    await call("export.sprite", filename, output=os.path.abspath(output_filename))
     if not _written(before, pattern):
-        raise AsepriteError("Aseprite exited 0 but wrote no file (the format may not be writable via --save-as)")
+        raise AsepriteError(f"Aseprite wrote no file (it may not be able to write the {format!r} format)")
 
     return f"Sprite exported successfully to {output_filename}"
 
@@ -115,18 +110,12 @@ async def export_frame(
 
     pattern = _pattern(output_filename, "*")
     before = _snapshot(pattern)
-    f0 = frame_index - 1  # CLI --frame-range is 0-based
-    await run_cli([
-        "--batch", filename,
-        "--frame-range", f"{f0},{f0}",
-        "--scale", str(scale),
-        "--save-as", output_filename,
-    ])
+    await call("export.frame", filename, frame=frame_index, scale=scale, output=os.path.abspath(output_filename))
 
     # With multi-frame sprites Aseprite may append the frame number to
     # the filename; rename the produced file when that happens.
     written = _written(before, pattern)
-    if output_filename not in written:
+    if os.path.abspath(output_filename) not in map(os.path.abspath, written):
         if not written:
             raise AsepriteError(f"Export reported success but {output_filename} was not created")
         os.replace(written[0], output_filename)
@@ -173,32 +162,16 @@ async def export_spritesheet(
     if data_filename:
         require_safe_path(data_filename)
 
-    args = ["--batch"]
-    if tag_name:
-        # Frame filters only apply to --sheet when they appear before the
-        # input file; resolve the tag to a 0-based --frame-range so a missing
-        # tag fails clearly instead of exporting every frame.
-        first, last = await _tag_range(filename, tag_name)
-        args += ["--frame-range", f"{first - 1},{last - 1}"]
-    args.append(filename)
-    if scale > 1:
-        args += ["--scale", str(scale)]
-    args += ["--sheet-type", sheet_type]
-    if padding > 0:
-        args += ["--shape-padding", str(padding)]
-    if data_filename:
-        args += ["--data", data_filename, "--format", data_format]
-        if list_tags:
-            args.append("--list-tags")
-    args += ["--sheet", output_filename]
-
     sheet_before = _snapshot(_pattern(output_filename))
     data_before = _snapshot(_pattern(data_filename)) if data_filename else {}
-    await run_cli(args)
+    await call("export.sheet", filename, output=os.path.abspath(output_filename), sheet_type=sheet_type,
+               scale=scale, padding=padding, tag=tag_name or None,
+               data=os.path.abspath(data_filename) if data_filename else None,
+               data_format=data_format, list_tags=list_tags)
     if not _written(sheet_before, _pattern(output_filename)):
-        raise AsepriteError("Aseprite exited 0 but wrote no sheet file")
+        raise AsepriteError("Aseprite wrote no sheet file")
     if data_filename and not _written(data_before, _pattern(data_filename)):
-        raise AsepriteError("Aseprite exited 0 but wrote no data file")
+        raise AsepriteError("Aseprite wrote no data file")
     msg = f"Sprite sheet exported to {output_filename} ({sheet_type})"
     if data_filename:
         msg += f" with data file {data_filename}"
@@ -224,17 +197,11 @@ async def export_layers(
 
     pattern = os.path.join(glob.escape(output_directory), "*.png")
     before = _snapshot(pattern)
-    args = ["--batch"]
-    if include_hidden:
-        args.append("--all-layers")
-    args += [
-        "--split-layers", filename,
-        "--save-as", os.path.join(output_directory, "{layer}.png"),
-    ]
-    await run_cli(args)
+    await call("export.layers", filename, directory=os.path.abspath(output_directory),
+               include_hidden=include_hidden)
     produced = [os.path.basename(p) for p in _written(before, pattern)]
     if not produced:
-        raise AsepriteError("Failed to export layers: Aseprite exited 0 but wrote no PNG files")
+        raise AsepriteError("Failed to export layers: Aseprite wrote no PNG files")
     return f"Layers exported to {output_directory}: {', '.join(produced)}"
 
 
@@ -258,21 +225,13 @@ async def export_tag(
         raise InputError("scale must be between 1 and 64")
     require_safe_path(output_filename)
 
-    # --tag silently exports *all* frames (exit 0) when the tag does not
-    # exist, so a produced file is not proof the tag was honoured.
-    await _tag_range(filename, tag_name)
-
-    args = ["--batch", filename, "--tag", tag_name]
-    if scale > 1:
-        args += ["--scale", str(scale)]
-    args += ["--save-as", output_filename]
     # A multi-frame tag saved to a still format produces frame-numbered
     # siblings instead of the exact name; those count.
     pattern = _pattern(output_filename, "*")
     before = _snapshot(pattern)
-    await run_cli(args)
+    await call("export.tag", filename, tag=tag_name, scale=scale, output=os.path.abspath(output_filename))
     if not _written(before, pattern):
-        raise AsepriteError("Aseprite exited 0 but wrote no file")
+        raise AsepriteError("Aseprite wrote no file")
     return f"Tag '{tag_name}' exported to {output_filename}"
 
 

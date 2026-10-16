@@ -62,15 +62,5 @@ lib.read("analysis.onion_skin", function(sprite, a)
   end
   comp:drawImage(lib.composite(sprite, index), Point(0, 0), 255, BlendMode.NORMAL)
 
-  local s = a.scale
-  local big = Image(comp.width * s, comp.height * s, ColorMode.RGB)
-  for y = 0, comp.height - 1 do
-    for x = 0, comp.width - 1 do
-      local v = comp:getPixel(x, y)
-      for oy = 0, s - 1 do
-        for ox = 0, s - 1 do big:putPixel(x * s + ox, y * s + oy, v) end
-      end
-    end
-  end
-  big:saveAs(a.output)
+  lib.scale_image(comp, a.scale):saveAs(a.output)
 end)

@@ -2,7 +2,7 @@
 
 A Python MCP server that gives AI assistants full control over [Aseprite](https://www.aseprite.org/) for creating pixel art and animated sprites.
 
-**104 tools across 17 categories** — canvas, drawing, layers, animation, palettes, effects, slices, tilemaps, exports, visual-feedback/analysis tools, and a raw Lua escape hatch. The tool set is designed so an LLM has everything it needs to produce *good* pixel art, not just primitives: shading ramps with hue shifting, ordered dithering, outlines, retro palette presets with quantization, onion-skin renders, and frame diffing for animation work.
+**116 tools across 18 categories** — canvas, drawing, layers, animation, palettes, effects, slices, tilemaps, exports, visual-feedback/analysis tools, and a raw Lua escape hatch. The tool set is designed so an LLM has everything it needs to produce *good* pixel art, not just primitives: shading ramps with hue shifting, ordered dithering, outlines, retro palette presets with quantization, onion-skin renders, and frame diffing for animation work.
 
 ## Example: a swordsman, drawn and animated by Claude
 
@@ -29,19 +29,19 @@ Both were created end-to-end by Claude Fable 5 through this server's MCP tools �
 
 | Category | Tools | Description |
 |----------|------:|-------------|
-| [Canvas](#canvas) | 6 | Create sprites, manage layers/frames, set the active state |
+| [Canvas](#canvas) | 7 | Create sprites, add layers, groups and frames, check layers and frames exist |
 | [Drawing](#drawing) | 14 | Pixels, lines, rectangles, circles, ellipses, polygons, paths, fills, gradients |
 | [Text](#text) | 3 | Draw and measure text with bitmap sprite-sheet or TrueType fonts |
 | [Layers](#layers) | 7 | Delete, rename, duplicate, reorder, blend modes, merge, flatten |
 | [Selection & Regions](#selection--regions) | 4 | Move, copy, and erase rectangular regions or colors |
-| [Effects](#effects) | 5 | Outlines, color replacement, HSL adjustment, ordered dithering |
+| [Effects](#effects) | 11 | Outlines, color replacement, HSL adjustment, ordered dithering, Aseprite's own filters |
 | [Animation](#animation) | 24 | Frames, cels, tags, tweening with easing, propagation |
-| [Palette](#palette) | 8 | Get/set palettes, retro presets, color ramps, quantization, color modes |
+| [Palette](#palette) | 9 | Get/set palettes, retro presets, color ramps, quantization, palette extraction, color modes |
 | [Transform](#transform) | 4 | Flip, rotate, resize, crop |
 | [Slices](#slices) | 5 | Named regions, 9-patch centers, pivot points |
 | [Tilemap](#tilemap) | 5 | Tilemap layers, tileset editing, tile placement |
 | [Export & Import](#export--import) | 7 | PNG, GIF, sprite sheets, per-layer/per-tag export, image import |
-| [Inspection](#inspection) | 3 | Read pixels and sprite metadata |
+| [Inspection](#inspection) | 5 | Read pixels (one layer or the visible composite) and sprite metadata |
 | [Analysis & Visual Feedback](#analysis--visual-feedback) | 3 | Onion-skin renders, frame diffing, color statistics |
 | [Quality](#quality) | 4 | Validate and sanitize animation consistency |
 | [Scene](#scene) | 1 | Copy layers between sprite files |
@@ -155,6 +155,12 @@ The pixel-art toolbox: clean outlines, palette-respecting blends, and shading va
 | `adjust_hsl` | Shift hue/saturation/lightness of a cel — palette swaps, night scenes, shadows |
 | `apply_dither_gradient` | Two-color gradient using Bayer 4×4 ordered dithering |
 | `apply_dither_pattern` | Uniform dithered mix of two colors at a given density |
+| `outline_native` | Aseprite's own outline filter: inside or outside, circle or square brush |
+| `adjust_hsl_native` | Aseprite's own hue/saturation/lightness filter, optionally limited to a region |
+| `adjust_brightness_contrast` | Aseprite's own brightness/contrast filter, optionally limited to a region |
+| `invert_colors` | Invert colors, optionally limited to a region |
+| `apply_convolution` | Aseprite's built-in convolution matrices: blur, sharpen, edges, emboss and more |
+| `list_convolution_matrices` | List the matrix names `apply_convolution` accepts |
 
 ### Animation
 
@@ -191,6 +197,7 @@ The pixel-art toolbox: clean outlines, palette-respecting blends, and shading va
 | `generate_color_ramp` | Build a dark→light shading ramp with hue shifting from a base color |
 | `quantize_to_palette` | Snap every pixel to the nearest palette color |
 | `remap_colors_in_cel_range` | Remap specific colors across a frame range |
+| `extract_palette` | Build an optimal palette of up to N colors from the art (replaces the sprite palette) |
 | `set_color_mode` | Convert between RGB, grayscale, and indexed |
 
 ### Transform
@@ -240,6 +247,8 @@ The pixel-art toolbox: clean outlines, palette-respecting blends, and shading va
 |------|-------------|
 | `get_pixel_color` | Read one pixel's RGBA |
 | `get_pixels_rect` | Read a rectangle of pixels as JSON |
+| `get_composite_pixel` | Read the color actually visible at a pixel (all visible layers composited) |
+| `get_composite_rect` | Read a rectangle of visible, composited pixels as JSON |
 | `get_sprite_info` | Sprite metadata (also listed under Animation) |
 
 ### Analysis & Visual Feedback
@@ -300,7 +309,7 @@ The server keeps one headless Aseprite running and sends it every tool call as a
 - **A failed edit changes nothing.** An op that edits a file runs in one transaction and is saved only if it finishes. If it fails partway, the file on disk is untouched.
 - **Failures are errors.** A tool that fails returns an MCP error result (`isError`), not a success with error text in it.
 - **Timeouts.** A request that runs longer than `ASEPRITE_TIMEOUT` seconds (default 120) gets the process killed. The next call starts a new one, and a crash is handled the same way.
-- Exports that need Aseprite's command line (`--save-as`, `--sheet`) still start a separate Aseprite. They run in turn with the other requests. An export only counts as done if it wrote or changed a file during this call.
+- **Exports run in the same process.** PNG, GIF, sprite sheets, per-layer and per-tag exports are ops too, so no tool starts a second Aseprite. Their output matches what Aseprite's command line wrote before, file for file and pixel for pixel. An export only counts as done if it wrote or changed a file during this call.
 
 ### Adding a tool
 

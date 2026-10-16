@@ -1,11 +1,9 @@
 import asyncio
 import atexit
 import os
-import subprocess
 
 import dotenv
 
-from .errors import AsepriteError
 from .worker import AsepriteWorker
 
 _ENV_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
@@ -29,25 +27,6 @@ TIMEOUT_SECONDS = _parse_timeout(os.getenv("ASEPRITE_TIMEOUT", "120"))
 
 worker = AsepriteWorker(ASEPRITE_PATH, TIMEOUT_SECONDS)
 atexit.register(worker.close)
-
-
-def _failure_text(done: subprocess.CompletedProcess) -> str:
-    # Aseprite reports some failures on stdout rather than stderr, so fall back
-    # to stdout before giving up.
-    text = (done.stderr or "").strip() or (done.stdout or "").strip()
-    return text or f"Aseprite exited with code {done.returncode} and printed nothing"
-
-
-async def run_cli(args: list[str]) -> str:
-    """Run a separate Aseprite with command-line arguments and return its stdout.
-
-    For CLI-only features (--save-as, --sheet). Runs in turn with the worker's
-    requests. Raises AsepriteError when Aseprite exits non-zero or times out.
-    """
-    done = await asyncio.to_thread(worker.run_cli, args)
-    if done.returncode != 0:
-        raise AsepriteError(_failure_text(done))
-    return done.stdout
 
 
 async def call(op: str, filename: str | None = None, /, **args):
