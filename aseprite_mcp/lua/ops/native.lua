@@ -2,8 +2,9 @@
 --
 -- app.command.* filters act on the active layer, frame and selection, not on
 -- arguments, so each op activates its target first. With no `layer` the
--- target is lib.default_target's layer. `region` = [x, y, w, h] limits the
--- filter to that rectangle through a temporary selection.
+-- target is lib.default_target's layer (the sprite's only layer).
+-- `region` = [x, y, w, h] limits the filter to that rectangle through a
+-- temporary selection.
 local lib = ...
 
 local function on_target(sprite, a, run)

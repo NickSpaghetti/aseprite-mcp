@@ -111,9 +111,6 @@ def test_import_image(two_frames, out_dir):
 
 # ── text ──────────────────────────────────────────────────────────────
 
-def test_text_default_layer_is_the_bottom_one(two_frames, bitmap_font):
-    ok(run(text.draw_text(two_frames, "A", 0, 0, bitmap_font, color="#FF00FF")))
-    assert coords(two_frames, "Layer 1") and not coords(two_frames) - {(1, 1)}
 
 
 def test_text_missing_layer(two_frames, bitmap_font):

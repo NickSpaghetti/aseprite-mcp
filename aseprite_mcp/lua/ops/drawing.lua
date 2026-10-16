@@ -1,7 +1,8 @@
 -- Drawing ops (tools/drawing.py).
 --
 -- Every op takes either `layer` + `frame` (the *_at tools) or neither (the
--- older tools, which draw on lib.default_target and never create a cel).
+-- older tools, which draw on lib.default_target, the sprite's only layer,
+-- and never create a cel).
 -- Coordinates are sprite coordinates. Colours arrive as [r, g, b, a].
 --
 -- Two ways of putting pixels down:

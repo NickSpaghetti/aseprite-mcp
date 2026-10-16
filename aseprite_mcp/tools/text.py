@@ -194,7 +194,8 @@ async def draw_text(
         size: Pixel size for TrueType fonts; integer scale factor for bitmap
             fonts (default 1)
         color: Text colour, #RRGGBB or #RRGGBBAA (default white)
-        layer_name: Layer to draw on; the active/first layer if omitted
+        layer_name: Layer to draw on; when omitted, the sprite's only layer
+            (required when there are several)
         frame_index: Frame index starting at 1 (default 1)
         anchor: Which point of the text (x, y) refers to - one of topleft,
             top, topright, left, center, right, bottomleft, bottom,

@@ -24,6 +24,9 @@ def _at(layer_name: str, frame_index: int, create_if_missing: bool) -> dict:
 async def draw_pixels(filename: str, pixels: List[Dict[str, Any]]) -> str:
     """Draw pixels on the canvas with specified colors.
 
+    Draws on the sprite's only layer, frame 1; on a sprite with several
+    layers it fails, so use the _at version and name the layer.
+
     Args:
         filename: Name of the Aseprite file to modify
         pixels: List of pixel data, each containing:
@@ -39,6 +42,9 @@ async def draw_pixels(filename: str, pixels: List[Dict[str, Any]]) -> str:
 @mcp.tool()
 async def draw_line(filename: str, x1: int, y1: int, x2: int, y2: int, color: str = "#000000", thickness: int = 1) -> str:
     """Draw a line on the canvas.
+
+    Draws on the sprite's only layer, frame 1; on a sprite with several
+    layers it fails, so use the _at version and name the layer.
 
     Args:
         filename: Name of the Aseprite file to modify
@@ -59,6 +65,9 @@ async def draw_line(filename: str, x1: int, y1: int, x2: int, y2: int, color: st
 @mcp.tool()
 async def draw_rectangle(filename: str, x: int, y: int, width: int, height: int, color: str = "#000000", fill: bool = False) -> str:
     """Draw a rectangle on the canvas.
+
+    Draws on the sprite's only layer, frame 1; on a sprite with several
+    layers it fails, so use the _at version and name the layer.
 
     Args:
         filename: Name of the Aseprite file to modify
@@ -82,6 +91,9 @@ async def draw_rectangle(filename: str, x: int, y: int, width: int, height: int,
 async def fill_area(filename: str, x: int, y: int, color: str = "#000000") -> str:
     """Fill an area with color using the paint bucket tool.
 
+    Draws on the sprite's only layer, frame 1; on a sprite with several
+    layers it fails, so use the _at version and name the layer.
+
     Args:
         filename: Name of the Aseprite file to modify
         x: X coordinate to fill from
@@ -97,6 +109,9 @@ async def fill_area(filename: str, x: int, y: int, color: str = "#000000") -> st
 @mcp.tool()
 async def draw_circle(filename: str, center_x: int, center_y: int, radius: int, color: str = "#000000", fill: bool = False) -> str:
     """Draw a circle on the canvas.
+
+    Draws on the sprite's only layer, frame 1; on a sprite with several
+    layers it fails, so use the _at version and name the layer.
 
     Args:
         filename: Name of the Aseprite file to modify

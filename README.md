@@ -62,7 +62,7 @@ Both were created end-to-end by Claude Fable 5 through this server's MCP tools â
 
 ### Drawing
 
-All `_at` variants target a specific layer/frame and can create the cel on demand. Coordinates are sprite-global.
+All `_at` variants target a specific layer/frame and can create the cel on demand. The tools without `_at` take no layer: they draw on frame 1 of a single-layer sprite and fail on a sprite with several layers. Coordinates are sprite-global.
 
 | Tool | Description |
 |------|-------------|

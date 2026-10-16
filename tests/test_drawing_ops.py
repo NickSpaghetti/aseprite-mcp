@@ -144,29 +144,11 @@ def test_bad_colours_are_rejected(blank):
     fails(drawing.apply_gradient_rect(blank, "paint", 1, 0, 0, 2, 2, "#000", "nope"), InputError, "Invalid color_end")
 
 
-# ── legacy tools: bottom layer, frame 1, cel must already exist ───────
-
-def test_legacy_tools_draw_on_the_bottom_layer(blank):
-    ok(run(drawing.draw_pixels_at(blank, "Layer 1", 1, [{"x": 0, "y": 0, "color": RED}])))
-    ok(run(drawing.draw_pixels(blank, [{"x": 1, "y": 1, "color": GREEN}])))
-    ok(run(drawing.draw_line(blank, 0, 4, 2, 4, GREEN)))
-    ok(run(drawing.draw_rectangle(blank, 0, 6, 2, 2, GREEN, fill=True)))
-    ok(run(drawing.draw_circle(blank, 10, 10, 1, GREEN, fill=True)))
-    bottom = coords(blank, "Layer 1")
-    assert {(1, 1), (0, 4), (2, 4), (0, 6), (1, 7), (10, 10)} <= bottom
-    assert coords(blank) == set()
 
 
-def test_legacy_fill_area(blank):
-    ok(run(drawing.draw_pixels_at(blank, "Layer 1", 1, [{"x": 15, "y": 15, "color": RED}])))
-    ok(run(drawing.fill_area(blank, 0, 0, GREEN)))
-    assert pixels(blank, "Layer 1")[(3, 3)] == "#00ff00ff"
 
 
-def test_legacy_tools_need_a_cel(blank):
-    # A new sprite's Layer 1 starts with an empty cel on frame 1; remove it.
-    ok(run(animation.clear_cel(blank, "Layer 1", 1)))
-    fails(drawing.draw_pixels(blank, [{"x": 1, "y": 1, "color": RED}]), AsepriteError)
+
 
 
 # ── behaviour changed by the move to ops (these failed before) ────────

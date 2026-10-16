@@ -58,7 +58,8 @@ async def outline_native(
 
     Args:
         filename: Aseprite file to modify
-        layer_name: layer to outline (empty = active layer)
+        layer_name: layer to outline (empty = the sprite's only layer; required
+            when there are several)
         frame_index: 1-based frame
         color: outline colour as #RRGGBB
         place: "outside" or "inside"
@@ -73,7 +74,7 @@ async def outline_native(
 
     await call("native.outline", filename, color=color_rgba, place=place, matrix=matrix,
                **_target(layer_name, frame_index))
-    return f"Outlined ({place}, {matrix}) {layer_name or 'active layer'} in {filename}"
+    return f"Outlined ({place}, {matrix}) {layer_name or 'the only layer'} in {filename}"
 
 
 @mcp.tool()
@@ -93,7 +94,8 @@ async def adjust_hsl_native(
 
     Args:
         filename: Aseprite file to modify
-        layer_name: layer to adjust (empty = active layer)
+        layer_name: layer to adjust (empty = the sprite's only layer; required
+            when there are several)
         frame_index: 1-based frame
         hue: -180..180 (degrees)
         saturation: -100..100
@@ -108,7 +110,7 @@ async def adjust_hsl_native(
 
     await call("native.hue_saturation", filename, hue=hue, saturation=saturation, lightness=lightness,
                region=_region(x, y, width, height), **_target(layer_name, frame_index))
-    return f"Adjusted HSL on {layer_name or 'active layer'} in {filename}"
+    return f"Adjusted HSL on {layer_name or 'the only layer'} in {filename}"
 
 
 @mcp.tool()
@@ -127,7 +129,8 @@ async def adjust_brightness_contrast(
 
     Args:
         filename: Aseprite file to modify
-        layer_name: layer to adjust (empty = active layer)
+        layer_name: layer to adjust (empty = the sprite's only layer; required
+            when there are several)
         frame_index: 1-based frame
         brightness: -100..100
         contrast: -100..100
@@ -139,7 +142,7 @@ async def adjust_brightness_contrast(
 
     await call("native.brightness_contrast", filename, brightness=brightness, contrast=contrast,
                region=_region(x, y, width, height), **_target(layer_name, frame_index))
-    return f"Adjusted brightness/contrast on {layer_name or 'active layer'} in {filename}"
+    return f"Adjusted brightness/contrast on {layer_name or 'the only layer'} in {filename}"
 
 
 @mcp.tool()
@@ -156,14 +159,15 @@ async def invert_colors(
 
     Args:
         filename: Aseprite file to modify
-        layer_name: layer to invert (empty = active layer)
+        layer_name: layer to invert (empty = the sprite's only layer; required
+            when there are several)
         frame_index: 1-based frame
         x, y, width, height: optional region (width>0 & height>0 to scope)
     """
     require_file(filename)
 
     await call("native.invert", filename, region=_region(x, y, width, height), **_target(layer_name, frame_index))
-    return f"Inverted colours on {layer_name or 'active layer'} in {filename}"
+    return f"Inverted colours on {layer_name or 'the only layer'} in {filename}"
 
 
 @mcp.tool()
@@ -183,7 +187,8 @@ async def apply_convolution(
         filename: Aseprite file to modify
         matrix: a built-in matrix name (see list_convolution_matrices),
             e.g. "blur-3x3", "sharpen-3x3", "edges-find", "misc-emboss"
-        layer_name: layer to filter (empty = active layer)
+        layer_name: layer to filter (empty = the sprite's only layer; required
+            when there are several)
         frame_index: 1-based frame
         x, y, width, height: optional region (width>0 & height>0 to scope)
     """
@@ -194,7 +199,7 @@ async def apply_convolution(
 
     await call("native.convolution", filename, matrix=matrix, region=_region(x, y, width, height),
                **_target(layer_name, frame_index))
-    return f"Applied convolution '{matrix}' on {layer_name or 'active layer'} in {filename}"
+    return f"Applied convolution '{matrix}' on {layer_name or 'the only layer'} in {filename}"
 
 
 @mcp.tool()

@@ -203,10 +203,19 @@ function lib.near(r, g, b, target, tolerance)
     and math.abs(b - target[3]) <= tolerance
 end
 
--- The target of the tools that take no layer or frame: the layer Aseprite
--- makes active when it opens the file (the bottom one) on frame 1.
+-- The layer for tools called without one: the sprite's only image layer
+-- (groups don't count), and frame 1. With several image layers there is no
+-- right answer, so the caller has to name one.
 function lib.default_target(sprite)
-  return app.activeLayer or sprite.layers[1], sprite.frames[1]
+  local layers = lib.image_layers(sprite)
+  if #layers ~= 1 then
+    local names = {}
+    for i, layer in ipairs(layers) do names[i] = layer.name end
+    lib.fail("LayerRequired", string.format(
+      "Sprite has %d layers (%s); name the layer to use. Tools without a layer argument only work on single-layer sprites",
+      #layers, table.concat(names, ", ")))
+  end
+  return layers[1], sprite.frames[1]
 end
 
 -- What frame `index` looks like: every visible layer composited into a new

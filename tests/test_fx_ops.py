@@ -153,12 +153,6 @@ def test_extract_palette(blank):
     assert result["count"] == len(result["colors"]) and "#FF0000" in result["colors"]
 
 
-def test_native_with_empty_layer_targets_the_bottom_layer(blank):
-    # Current rule (increment 3 revisits it): empty layer_name = lib.default_target.
-    dot(blank, 1, 1, "#000000", layer="Layer 1")
-    dot(blank, 1, 1, "#000000")
-    ok(run(native_fx.invert_colors(blank, "", 1)))
-    assert (pixels(blank, "Layer 1")[(1, 1)], pixels(blank)[(1, 1)]) == ("#ffffffff", "#000000ff")
 
 
 def test_native_missing_layer_and_frame(blank):

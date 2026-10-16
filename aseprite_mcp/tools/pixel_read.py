@@ -32,7 +32,8 @@ async def get_pixel_color(
         filename: Aseprite file to read
         x: X coordinate
         y: Y coordinate
-        layer_name: Layer to read from (uses active layer when empty)
+        layer_name: Layer to read from (empty = the sprite's only layer; required
+            when there are several)
         frame_index: Frame index starting at 1
     """
     require_file(filename)
@@ -60,7 +61,8 @@ async def get_pixels_rect(
         y: Top-left y coordinate
         width: Width of the region
         height: Height of the region
-        layer_name: Layer to read from (uses active layer when empty)
+        layer_name: Layer to read from (empty = the sprite's only layer; required
+            when there are several)
         frame_index: Frame index starting at 1
 
     Returns:

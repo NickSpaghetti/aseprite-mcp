@@ -37,9 +37,6 @@ def test_pixel_color_format(scene):
     assert run(pixel_read.get_pixel_color(scene, 5, 5, "top")).endswith("a=0)")
 
 
-def test_pixel_color_default_layer_is_the_bottom_one(scene):
-    assert run(pixel_read.get_pixel_color(scene, 1, 1)).startswith("#ff0000")
-    fails(pixel_read.get_pixel_color(scene, 1, 1, "", 2), AsepriteError, "No active cel")
 
 
 def test_pixel_reads_follow_cel_offsets(scene):
