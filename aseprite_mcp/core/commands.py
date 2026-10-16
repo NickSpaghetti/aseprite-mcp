@@ -61,6 +61,17 @@ async def run_cli(args: list[str]) -> str:
     return done.stdout
 
 
+async def call(op: str, filename: str | None = None, /, **args):
+    """Run the op registered as `op` (see lua/lib.lua) on `filename` and return its result.
+
+    `op` and `filename` are positional-only, so any keyword, including one
+    named `filename`, is an op argument. `args` are sent to Lua as JSON; None
+    values are left out, so the op sees them as nil. Raises AsepriteError, carrying the op's failure code, when the
+    op fails.
+    """
+    return await asyncio.to_thread(worker.run_op, op, args, filename)
+
+
 async def run_script(script: str, filename: str | None = None, check_errors: bool = True) -> str:
     """Run a Lua chunk in the worker, with `filename` open as app.activeSprite.
 

@@ -12,4 +12,11 @@ class InputError(ToolError):
 
 
 class AsepriteError(ToolError):
-    """Aseprite failed, or the script reported failure with an ERROR: line."""
+    """Aseprite failed, or an op or script reported failure.
+
+    `code` is the op's failure code (for example "LayerNotFound") when there is one.
+    """
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code

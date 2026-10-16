@@ -1,7 +1,6 @@
-from ..core.commands import lua_escape, run_script
+from ..core.commands import call
 from ..core.boundary import require_file, require_safe_path
 from ..core.errors import InputError
-from ..core.lua import FIND_LAYER
 from .. import mcp
 
 @mcp.tool()
@@ -17,15 +16,7 @@ async def create_canvas(width: int, height: int, filename: str = "canvas.aseprit
         raise InputError("Width and height must be > 0")
     require_safe_path(filename)
 
-    safe_path = lua_escape(filename.replace("\\", "/"))
-    script = f"""
-    local spr = Sprite({width}, {height})
-    spr:saveAs("{safe_path}")
-    print("OK")
-    """
-
-    await run_script(script)
-
+    await call("canvas.create", width=width, height=height, filename=filename)
     return f"Canvas created successfully: {filename}"
 
 @mcp.tool()
@@ -40,32 +31,7 @@ async def add_layer(filename: str, layer_name: str, group: str = "") -> str:
     """
     require_file(filename)
 
-    safe_layer_name = lua_escape(layer_name)
-    safe_group = lua_escape(group)
-    script = f"""
-    {FIND_LAYER}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local parent = nil
-    if "{safe_group}" ~= "" then
-        parent = find_layer(spr, "{safe_group}")
-        if not parent then print("ERROR:Group not found") return end
-        if not parent.isGroup then print("ERROR:Target is not a group") return end
-    end
-
-    app.transaction(function()
-        local lyr = spr:newLayer()
-        lyr.name = "{safe_layer_name}"
-        if parent then lyr.parent = parent end
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
-
+    await call("canvas.add_layer", filename, name=layer_name, group=group or None)
     location = f" inside group '{group}'" if group else ""
     return f"Layer '{layer_name}' added{location} to {filename}"
 
@@ -84,32 +50,7 @@ async def add_group(filename: str, group_name: str, parent_group: str = "") -> s
     """
     require_file(filename)
 
-    safe_group = lua_escape(group_name)
-    safe_parent = lua_escape(parent_group)
-    script = f"""
-    {FIND_LAYER}
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local parent = nil
-    if "{safe_parent}" ~= "" then
-        parent = find_layer(spr, "{safe_parent}")
-        if not parent then print("ERROR:Parent group not found") return end
-        if not parent.isGroup then print("ERROR:Target is not a group") return end
-    end
-
-    app.transaction(function()
-        local grp = spr:newGroup()
-        grp.name = "{safe_group}"
-        if parent then grp.parent = parent end
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
-
+    await call("canvas.add_group", filename, name=group_name, parent=parent_group or None)
     location = f" inside '{parent_group}'" if parent_group else ""
     return f"Group '{group_name}' created{location} in {filename}"
 
@@ -121,21 +62,8 @@ async def add_frame(filename: str) -> str:
         filename: Name of the Aseprite file to modify
     """
     require_file(filename)
-    
-    script = """
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
 
-    app.transaction(function()
-        spr:newFrame()
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
-
+    await call("canvas.add_frame", filename)
     return f"New frame added successfully to {filename}"
 
 @mcp.tool()
@@ -148,25 +76,7 @@ async def set_frame(filename: str, frame_index: int) -> str:
     """
     require_file(filename)
 
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then
-        print("ERROR:Frame index out of range") return
-    end
-
-    app.transaction(function()
-        app.activeFrame = spr.frames[idx]
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
-
+    await call("canvas.set_frame", filename, frame=frame_index)
     return f"Active frame set to {frame_index} in {filename}"
 
 @mcp.tool()
@@ -182,25 +92,7 @@ async def set_frame_duration(filename: str, frame_index: int, duration_ms: int) 
     if duration_ms <= 0:
         raise InputError("Duration must be > 0")
 
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    local idx = {frame_index}
-    if idx < 1 or idx > #spr.frames then
-        print("ERROR:Frame index out of range") return
-    end
-
-    app.transaction(function()
-        spr.frames[idx].duration = {duration_ms} / 1000.0
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
-
+    await call("canvas.set_frame_duration", filename, frame=frame_index, duration_ms=duration_ms)
     return f"Frame {frame_index} duration set to {duration_ms}ms in {filename}"
 
 @mcp.tool()
@@ -214,32 +106,5 @@ async def set_layer(filename: str, layer_name: str, create_if_missing: bool = Fa
     """
     require_file(filename)
 
-    create_flag = "true" if create_if_missing else "false"
-    safe_layer_name = lua_escape(layer_name)
-
-    script = f"""
-    local spr = app.activeSprite
-    if not spr then print("ERROR:No active sprite") return end
-
-    {FIND_LAYER}
-    local target = find_layer(spr, "{safe_layer_name}")
-
-    app.transaction(function()
-        if not target then
-            if {create_flag} then
-                target = spr:newLayer()
-                target.name = "{safe_layer_name}"
-            else
-                return
-            end
-        end
-        app.activeLayer = target
-    end)
-
-    spr:saveAs(spr.filename)
-    print("OK")
-    """
-
-    await run_script(script, filename)
-
+    await call("canvas.set_layer", filename, name=layer_name, create_if_missing=create_if_missing)
     return f"Active layer set to '{layer_name}' in {filename}"

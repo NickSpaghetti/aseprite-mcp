@@ -5,9 +5,10 @@ run one at a time through a single process. That ordering is also what keeps
 concurrent tool calls on the same file from losing each other's writes.
 
 The process runs lua/worker.lua, which reads JSON requests on stdin and answers
-with framed JSON replies on stdout. A request that runs past the timeout gets
-the process killed; the next request starts a fresh one. A crash is handled the
-same way.
+with framed JSON replies on stdout. On start it is sent lua/lib.lua and every
+lua/ops/*.lua file, which register the ops that tools call by name. A request
+that runs past the timeout gets the process killed; the next request starts a
+fresh one. A crash is handled the same way.
 """
 
 import collections
@@ -22,7 +23,7 @@ from pathlib import Path
 from .errors import AsepriteError
 
 FRAME = "\x1eASEMCP "
-_WORKER_LUA = Path(__file__).resolve().parent.parent / "lua" / "worker.lua"
+_LUA_DIR = Path(__file__).resolve().parent.parent / "lua"
 _EOF = None
 
 
@@ -41,28 +42,22 @@ class AsepriteWorker:
     def pid(self) -> int | None:
         return self._proc.pid if self._proc and self._proc.poll() is None else None
 
+    def run_op(self, op: str, args: dict, filename: str | None = None):
+        """Run a registered op on `filename` and return its result (decoded JSON, or None)."""
+        request = {"op": op, "args": {k: v for k, v in args.items() if v is not None}}
+        if filename:
+            request["file"] = filename
+        with self._lock:
+            reply, _ = self._request(request)
+        return reply.get("result")
+
     def run_script(self, code: str, filename: str | None = None) -> str:
         """Run a Lua chunk with `filename` open as the active sprite; return what it printed."""
+        request = {"code": code}
+        if filename:
+            request["file"] = filename
         with self._lock:
-            if self._proc is None or self._proc.poll() is not None:
-                self._start()
-            self._next_id += 1
-            request_id = self._next_id
-            try:
-                request = {"id": request_id, "code": code}
-                if filename:
-                    request["file"] = filename
-                self._proc.stdin.write(json.dumps(request) + "\n")
-                self._proc.stdin.flush()
-            except OSError:
-                raise self._died() from None
-            reply, stray = self._read_reply()
-
-        if reply.get("id") != request_id:
-            raise AsepriteError(f"Aseprite worker answered request {reply.get('id')} instead of {request_id}")
-        if not reply.get("ok"):
-            error = reply.get("error") or {}
-            raise AsepriteError(error.get("message") or error.get("code") or "Aseprite reported a failure")
+            reply, stray = self._request(request)
         return "\n".join(filter(None, [reply.get("output", ""), *stray]))
 
     def run_cli(self, args: list[str]) -> subprocess.CompletedProcess:
@@ -77,6 +72,29 @@ class AsepriteWorker:
     def close(self) -> None:
         with self._lock:
             self._stop()
+
+    def _request(self, request: dict) -> tuple[dict, list[str]]:
+        # Caller holds self._lock.
+        if self._proc is None or self._proc.poll() is not None:
+            self._start()
+        return self._send(request)
+
+    def _send(self, request: dict) -> tuple[dict, list[str]]:
+        self._next_id += 1
+        request = {"id": self._next_id, **request}
+        try:
+            self._proc.stdin.write(json.dumps(request) + "\n")
+            self._proc.stdin.flush()
+        except OSError:
+            raise self._died() from None
+        reply, stray = self._read_reply()
+        if reply.get("id") != request["id"]:
+            raise AsepriteError(f"Aseprite worker answered request {reply.get('id')} instead of {request['id']}")
+        if not reply.get("ok"):
+            error = reply.get("error") or {}
+            raise AsepriteError(error.get("message") or error.get("code") or "Aseprite reported a failure",
+                                code=error.get("code"))
+        return reply, stray
 
     def _read_reply(self) -> tuple[dict, list[str]]:
         stray = []
@@ -103,7 +121,7 @@ class AsepriteWorker:
         # that runs Aseprite in a container (it mounts the temp dir) can read it.
         fd, self._script_path = tempfile.mkstemp(prefix="aseprite-mcp-worker-", suffix=".lua")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(_WORKER_LUA.read_text(encoding="utf-8"))
+            fh.write((_LUA_DIR / "worker.lua").read_text(encoding="utf-8"))
         self._proc = subprocess.Popen(
             [self.executable, "--batch", "--script", self._script_path],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -113,6 +131,15 @@ class AsepriteWorker:
         self._stderr.clear()
         threading.Thread(target=self._pump_stdout, args=(self._proc, self._lines), daemon=True).start()
         threading.Thread(target=self._pump_stderr, args=(self._proc,), daemon=True).start()
+        # The op files go over stdin rather than by path, for the same reason.
+        chunks = [_LUA_DIR / "lib.lua", *sorted((_LUA_DIR / "ops").glob("*.lua"))]
+        load = [{"name": path.relative_to(_LUA_DIR).as_posix(), "code": path.read_text(encoding="utf-8")}
+                for path in chunks]
+        try:
+            self._send({"load": load})
+        except AsepriteError:
+            self._stop()
+            raise
 
     def _stop(self) -> None:
         proc, self._proc = self._proc, None
